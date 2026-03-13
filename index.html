@@ -601,6 +601,7 @@ let snoozedUntil = {};
 let currentEvents = [];
 let timerEndMs = 0;
 let timerStartMs = 0;
+let eventsMap = {};
 
 // Ring circumference for r=158: 2*π*158 ≈ 992.88
 const CIRCUMFERENCE = 992.88;
@@ -808,6 +809,8 @@ function renderEvents(events) {
   }
 
   const nowMs = Date.now();
+  eventsMap = {};
+  events.forEach(ev => { eventsMap[ev.id] = ev; });
   grid.innerHTML = events.map(ev => {
     // Graph returns times in local timezone (via Prefer header), no Z suffix
     // new Date("2026-03-13T08:00:00") is parsed as LOCAL time by JS - correct
@@ -854,9 +857,9 @@ function renderEvents(events) {
           </div>
         </div>
         <div class="ev-action">
-          ${isLive && !dismissedTimers.has(ev.id) ? `<button class="btn btn-primary" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 計時</button>` : ''}
-          ${!isLive && !isPast ? `<button class="btn" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 提早開始</button>` : ''}
-          ${isPast || dismissedTimers.has(ev.id) ? `<button class="btn" style="border-color:var(--text-muted);color:var(--text-muted)" onclick="restartTimer(${JSON.stringify(ev).replace(/"/g,'&quot;')})">↺ 重啟</button>` : ''}
+          ${isLive && !dismissedTimers.has(ev.id) ? `<button class="btn btn-primary" onclick="activateTimerById('${ev.id}')">⏱ 計時</button>` : ''}
+          ${!isLive && !isPast ? `<button class="btn" onclick="activateTimerById('${ev.id}')">⏱ 提早開始</button>` : ''}
+          ${isPast || dismissedTimers.has(ev.id) ? `<button class="btn" style="border-color:var(--text-muted);color:var(--text-muted)" onclick="restartTimerById('${ev.id}')">↺ 重啟</button>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -1100,6 +1103,16 @@ function snoozeMinutes(mins) {
   document.getElementById('snooze-btn').style.display = 'none';
   document.getElementById('overtime-badge').style.display = 'none';
   showToast(`已延後 ${mins} 分鐘`, '⏰');
+}
+
+function activateTimerById(id) {
+  const ev = eventsMap[id];
+  if (ev) activateTimerManual(ev);
+}
+
+function restartTimerById(id) {
+  const ev = eventsMap[id];
+  if (ev) restartTimer(ev);
 }
 
 function restartTimer(ev) {
