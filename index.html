@@ -187,6 +187,8 @@ body {
 .btn:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 16px var(--accent-glow); }
 .btn:active { transform: scale(0.97); }
 
+.snooze-options-panel { display: none; }
+.snooze-options-panel.visible { display: flex; }
 .btn-primary {
   background: var(--accent); border-color: var(--accent); color: white;
   box-shadow: 0 4px 20px var(--accent-glow);
@@ -523,7 +525,7 @@ body {
         <button class="btn" onclick="endEarly()" style="border-color:var(--rose);color:var(--rose)">⏹ 結束會議</button>
         <button class="btn btn-primary" id="snooze-btn" onclick="snoozeReminder()" style="display:none">⏰ 延後 2 分鐘</button>
       </div>
-      <div id="snooze-options" style="display:none;margin-top:12px;gap:8px;justify-content:center;flex-wrap:wrap;">
+      <div id="snooze-options" class="snooze-options-panel" style="margin-top:12px;gap:8px;justify-content:center;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--text-muted);align-self:center;">延後：</span>
         <button class="btn" onclick="snoozeMinutes(5)" style="padding:5px 12px;font-size:11px">+5 分</button>
         <button class="btn" onclick="snoozeMinutes(10)" style="padding:5px 12px;font-size:11px">+10 分</button>
@@ -665,8 +667,15 @@ async function getToken() {
 }
 
 // ===== Init =====
-// Unlock AudioContext on first user gesture (required by browsers)
-document.addEventListener('click', () => { try { getAudioCtx(); } catch(e) {} }, { once: true });
+// Unlock AudioContext on first user gesture (required by browsers, especially Safari/iOS)
+function unlockAudio() {
+  try {
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+  } catch(e) {}
+}
+document.addEventListener('click', unlockAudio, { once: true });
+document.addEventListener('touchend', unlockAudio, { once: true });
 
 function initApp() {
   WARNING_MINUTES = parseInt(document.getElementById('warning-minutes').value) || 5;
@@ -886,7 +895,7 @@ function endEarly() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   activeEvent = null;
   document.getElementById('snooze-btn').style.display = 'none';
-  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-options').classList.remove('visible');
   document.getElementById('overtime-badge').style.display = 'none';
   renderEvents(currentEvents);
   showToast('會議已結束', '✓');
@@ -937,7 +946,7 @@ function activateTimer(ev) {
   section.style.display = 'block';
   section.className = 'state-active';
   document.getElementById('overtime-badge').style.display = 'none';
-  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-options').classList.remove('visible');
   document.getElementById('snooze-btn').style.display = 'none';
   document.getElementById('timer-meeting-name').textContent = ev.subject || '（無標題）';
   if (timerInterval) clearInterval(timerInterval);
@@ -997,7 +1006,7 @@ function updateTimer(ev, t) {
       ev._overtimeSoundPlayed = true;
       playEndSound();
       fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
-      document.getElementById('snooze-options').style.display = 'flex';
+      document.getElementById('snooze-options').classList.add('visible');
     }
   } else {
     badge.style.display = 'none';
@@ -1034,7 +1043,7 @@ function updateTimer(ev, t) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        document.getElementById('snooze-options').style.display = 'flex';
+        document.getElementById('snooze-options').classList.add('visible');
         vibrateAndBeep();
       }
     } else {
@@ -1064,6 +1073,7 @@ function updateTimer(ev, t) {
 function playEndSound() {
   try {
     const ctx = getAudioCtx();
+    if (!ctx) return;
     [0, 0.35].forEach(delay => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -1085,7 +1095,7 @@ function dismissTimer() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   activeEvent = null;
   document.getElementById('snooze-btn').style.display = 'none';
-  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-options').classList.remove('visible');
   document.getElementById('overtime-badge').style.display = 'none';
   renderEvents(currentEvents);
 }
@@ -1103,7 +1113,7 @@ function snoozeMinutes(mins) {
   warnedEvents.delete(activeEvent.id);
   delete snoozedUntil[activeEvent.id];
   delete activeEvent._overtimeSoundPlayed;
-  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-options').classList.remove('visible');
   document.getElementById('snooze-btn').style.display = 'none';
   document.getElementById('overtime-badge').style.display = 'none';
   showToast(`已延後 ${mins} 分鐘`, '⏰');
@@ -1205,11 +1215,19 @@ function startManualTimer() {
 
 let _audioCtx = null;
 function getAudioCtx() {
-  if (!_audioCtx || _audioCtx.state === 'closed') {
-    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    if (!_audioCtx || _audioCtx.state === 'closed') {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      _audioCtx = new AC();
+    }
+    if (_audioCtx.state === 'suspended') {
+      _audioCtx.resume();
+    }
+    return _audioCtx;
+  } catch(e) {
+    console.warn('AudioContext error:', e);
+    return null;
   }
-  if (_audioCtx.state === 'suspended') _audioCtx.resume();
-  return _audioCtx;
 }
 
 function vibrateAndBeep() {
@@ -1217,6 +1235,7 @@ function vibrateAndBeep() {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   try {
     const ctx = getAudioCtx();
+    if (!ctx) return;
     [550, 660].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
