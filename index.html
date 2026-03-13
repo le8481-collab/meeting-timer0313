@@ -536,6 +536,13 @@ body {
         <button class="btn" onclick="endEarly()" style="border-color:var(--rose);color:var(--rose)">⏹ 結束會議</button>
         <button class="btn btn-primary" id="snooze-btn" onclick="snoozeReminder()" style="display:none">⏰ 延後 2 分鐘</button>
       </div>
+      <div id="snooze-options" style="display:none;margin-top:12px;gap:8px;justify-content:center;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text-muted);align-self:center;">延後：</span>
+        <button class="btn" onclick="snoozeMinutes(5)" style="padding:5px 12px;font-size:11px">+5 分</button>
+        <button class="btn" onclick="snoozeMinutes(10)" style="padding:5px 12px;font-size:11px">+10 分</button>
+        <button class="btn" onclick="snoozeMinutes(15)" style="padding:5px 12px;font-size:11px">+15 分</button>
+        <button class="btn" onclick="snoozeMinutes(30)" style="padding:5px 12px;font-size:11px">+30 分</button>
+      </div>
     </div>
 
     <!-- Events -->
@@ -843,10 +850,11 @@ function renderEvents(events) {
             ${org ? `<span>👤 ${org}</span>` : ''}
           </div>
         </div>
-        ${!isPast && !dismissedTimers.has(ev.id) ? `
-          <div class="ev-action">
-            <button class="btn ${isLive ? 'btn-primary' : ''}" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ ${isLive ? '計時' : '提早開始'}</button>
-          </div>` : ''}
+        <div class="ev-action">
+          ${isLive && !dismissedTimers.has(ev.id) ? `<button class="btn btn-primary" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 計時</button>` : ''}
+          ${!isLive && !isPast ? `<button class="btn" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 提早開始</button>` : ''}
+          ${isPast || dismissedTimers.has(ev.id) ? `<button class="btn" style="border-color:var(--text-muted);color:var(--text-muted)" onclick="restartTimer(${JSON.stringify(ev).replace(/"/g,'&quot;')})">↺ 重啟</button>` : ''}
+        </div>
       </div>`;
   }).join('');
 }
@@ -867,18 +875,16 @@ function activateTimerManual(ev) {
 }
 
 function endEarly() {
-  // Mark as ended now
   if (!activeEvent) return;
-  // Create a fake end at now so timer shows 00:00
-  const now = new Date();
-  const fakeEv = { ...activeEvent, end: { dateTime: now.toISOString() } };
   dismissedTimers.add(activeEvent.id);
   document.getElementById('timer-section').style.display = 'none';
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   activeEvent = null;
   document.getElementById('snooze-btn').style.display = 'none';
+  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('overtime-badge').style.display = 'none';
   renderEvents(currentEvents);
-  showToast('會議已提早結束', '✓');
+  showToast('會議已結束', '✓');
 }
 
 function checkAndActivateTimer(events) {
@@ -947,11 +953,12 @@ function updateTimer(ev) {
     labelEl.textContent = '超時';
     document.getElementById('elapsed-pct').textContent = '+' + Math.round(overtimeSecs/60) + ' 分';
 
-    // Play end sound once when overtime starts
+    // Play end sound once when overtime starts, show delay options again
     if (!ev._overtimeSoundPlayed) {
       ev._overtimeSoundPlayed = true;
       playEndSound();
-      fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！請結束會議。');
+      fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
+      document.getElementById('snooze-options').style.display = 'flex';
     }
   } else {
     badge.style.display = 'none';
@@ -989,7 +996,7 @@ function updateTimer(ev) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        document.getElementById('snooze-btn').style.display = 'inline-flex';
+        document.getElementById('snooze-options').style.display = 'flex';
         vibrateAndBeep();
       }
     } else {
@@ -1025,15 +1032,51 @@ function dismissTimer() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   activeEvent = null;
   document.getElementById('snooze-btn').style.display = 'none';
+  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('overtime-badge').style.display = 'none';
   renderEvents(currentEvents);
 }
 
 function snoozeReminder() {
-  if (!activeEvent) return;
-  snoozedUntil[activeEvent.id] = new Date(Date.now() + 2 * 60000);
-  warnedEvents.delete(activeEvent.id);
+  // Show multi-option panel instead of immediately snoozing
+  const opts = document.getElementById('snooze-options');
+  opts.style.display = 'flex';
   document.getElementById('snooze-btn').style.display = 'none';
-  showToast('已延後 2 分鐘提醒', '⏰');
+}
+
+function snoozeMinutes(mins) {
+  if (!activeEvent) return;
+  // Extend the event's end time by the chosen minutes
+  const currentEnd = parseGraphDateFixed(activeEvent.end.dateTime);
+  const newEnd = new Date(currentEnd.getTime() + mins * 60000);
+  activeEvent.end = { dateTime: newEnd.toISOString() };
+  // Reset warning so it fires again when new deadline approaches
+  warnedEvents.delete(activeEvent.id);
+  delete snoozedUntil[activeEvent.id];
+  delete activeEvent._overtimeSoundPlayed;
+  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-btn').style.display = 'none';
+  document.getElementById('overtime-badge').style.display = 'none';
+  showToast(`已延後 ${mins} 分鐘`, '⏰');
+}
+
+function restartTimer(ev) {
+  // Remove from dismissed set so it can be restarted
+  dismissedTimers.delete(ev.id);
+  warnedEvents.delete(ev.id);
+  delete snoozedUntil[ev.id];
+  // For past events, restart with original duration from now
+  const origStart = parseGraphDateFixed(ev.start.dateTime);
+  const origEnd   = parseGraphDateFixed(ev.end.dateTime);
+  const duration  = origEnd - origStart;
+  const now = new Date();
+  const newEnd = new Date(now.getTime() + duration);
+  const restartedEv = {
+    ...ev,
+    start: { dateTime: now.toISOString() },
+    end:   { dateTime: newEnd.toISOString() }
+  };
+  activateTimer(restartedEv);
 }
 
 // ===== Notification =====
@@ -1094,6 +1137,7 @@ function startManualTimer() {
 }
 
 function vibrateAndBeep() {
+  // 5-min warning: single mid-tone beep
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1101,11 +1145,12 @@ function vibrateAndBeep() {
     const gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.frequency.setValueAtTime(550, ctx.currentTime);
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
     osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.6);
+    osc.stop(ctx.currentTime + 0.8);
   } catch(e) {}
 }
 
