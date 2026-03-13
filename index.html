@@ -879,12 +879,14 @@ function checkAndActivateTimer(events) {
   if (activeEvent) return;
   const nowMs = Date.now();
   for (const ev of events) {
-    // Use local-parsed times (Taiwan) for live detection
     const startLocal = parseGraphDateFixed(ev.start.dateTime).getTime();
     const endLocal   = parseGraphDateFixed(ev.end.dateTime).getTime();
     if (startLocal <= nowMs && endLocal > nowMs && !dismissedTimers.has(ev.id)) {
-      const remaining = endLocal - nowMs;
-      const enriched = { ...ev, _endMs: nowMs + remaining, _startMs: nowMs };
+      // Duration is always correct (both times in same tz, difference is valid)
+      const totalDuration = endLocal - startLocal;
+      const elapsed = nowMs - startLocal;
+      const remaining = totalDuration - elapsed;
+      const enriched = { ...ev, _endMs: nowMs + remaining, _startMs: nowMs - elapsed };
       activateTimer(enriched);
       break;
     }
