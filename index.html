@@ -540,6 +540,7 @@ body {
       <div class="section-meta">
         <span class="refresh-time" id="refresh-time"></span>
         <button class="btn" onclick="openManualTimer()" style="padding:6px 12px;font-size:11px">⏱ 手動計時</button>
+        <button class="btn" onclick="testSound()" style="padding:6px 12px;font-size:11px;background:var(--amber,#f59e0b);color:#000;border-color:transparent">🔔 測試聲音</button>
         <button class="btn" id="refresh-btn" onclick="refreshEvents()" style="padding:6px 12px;font-size:11px">↻ 重新整理</button>
         <span class="count-badge" id="event-count">—</span>
       </div>
@@ -1253,6 +1254,17 @@ async function playEndSound() {
 }
 
 // Unlock on first gesture
+async function testSound() {
+  const ok = await _initAudio();
+  console.log('[test] audio ready:', ok, 'AC state:', _AC?.state);
+  if (!ok) {
+    alert('音效初始化失敗！AC state: ' + (_AC?.state || 'null'));
+    return;
+  }
+  await vibrateAndBeep();
+  showToast('聲音測試中...', '🔔');
+}
+
 async function unlockAudioOnGesture() {
   const ok = await _initAudio();
   console.log('[audio] unlocked on gesture:', ok);
