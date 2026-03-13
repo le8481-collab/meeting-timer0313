@@ -897,11 +897,17 @@ function checkAndActivateTimer(events) {
   for (const ev of events) {
     const startLocal = parseGraphDateFixed(ev.start.dateTime).getTime();
     const endLocal   = parseGraphDateFixed(ev.end.dateTime).getTime();
+    console.log('[MeetingSync] checking:', ev.subject);
+    console.log('  start raw:', ev.start.dateTime, '→', new Date(startLocal).toLocaleString('zh-TW'));
+    console.log('  end raw:  ', ev.end.dateTime,   '→', new Date(endLocal).toLocaleString('zh-TW'));
+    console.log('  now:', new Date(nowMs).toLocaleString('zh-TW'));
     if (startLocal <= nowMs && endLocal > nowMs && !dismissedTimers.has(ev.id)) {
-      // Duration is always correct (both times in same tz, difference is valid)
       const totalDuration = endLocal - startLocal;
       const elapsed = nowMs - startLocal;
       const remaining = totalDuration - elapsed;
+      console.log('  totalDuration(min):', Math.round(totalDuration/60000));
+      console.log('  elapsed(min):', Math.round(elapsed/60000));
+      console.log('  remaining(min):', Math.round(remaining/60000));
       const enriched = { ...ev, _endMs: nowMs + remaining, _startMs: nowMs - elapsed };
       activateTimer(enriched);
       break;
