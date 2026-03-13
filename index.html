@@ -732,13 +732,20 @@ function parseGraphDate(dt) {
 
 function parseGraphDateFixed(dt) {
   if (!dt) return new Date();
-  // With Prefer header, Graph returns times in Asia/Taipei
-  // If no timezone suffix, treat as local (Taiwan) time
-  if (dt.endsWith('Z') || dt.includes('+') || (dt.lastIndexOf('-') > 7)) {
+  // Graph with Prefer: outlook.timezone header returns dateTime WITHOUT tz suffix
+  // in the user's local timezone. Parse as local time using browser offset.
+  if (dt.endsWith('Z') || dt.includes('+')) {
+    // Has explicit UTC or offset - parse directly
     return new Date(dt);
   }
-  // No TZ suffix: append +08:00 for Taiwan
-  return new Date(dt + '+08:00');
+  if (dt.lastIndexOf('-') > 7) {
+    // Has negative offset like 2026-03-13T09:00:00-05:00
+    return new Date(dt);
+  }
+  // No suffix: Graph returned in local timezone. Parse as local time.
+  // Use the browser's current offset to convert to UTC correctly.
+  const localDate = new Date(dt); // JS parses no-tz as LOCAL time - correct!
+  return localDate;
 }
 
 async function fetchOutlookEvents() {
@@ -746,26 +753,35 @@ async function fetchOutlookEvents() {
     const token = await getToken() || accessToken;
     if (!token) return getDemoEvents();
 
-    const today = new Date();
-    // Build query range in local time string format for Graph API
+    // Get browser's IANA timezone (e.g. "Asia/Taipei")
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // Build today's range in local time
     const pad = n => String(n).padStart(2,'0');
     const d = new Date();
     const localStart = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T00:00:00`;
     const localEnd   = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T23:59:59`;
-    const start = new Date(today.setHours(0,0,0,0)).toISOString();
-    const end   = new Date(today.setHours(23,59,59,999)).toISOString();
     const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${localStart}&endDateTime=${localEnd}&$select=subject,start,end,location,organizer,id&$orderby=start/dateTime&$top=20`;
 
     const resp = await fetch(url, {
       headers: {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json',
-        'Prefer': 'outlook.timezone="Asia/Taipei"'
+        // Ask Graph to return all times in the browser's local timezone
+        'Prefer': `outlook.timezone="${tz}"`
       }
     });
     if (!resp.ok) throw new Error('API ' + resp.status);
     const data = await resp.json();
-    return data.value || [];
+    const events = data.value || [];
+
+    // Log first event for debugging
+    if (events.length > 0) {
+      console.log('[MeetingSync] timezone:', tz);
+      console.log('[MeetingSync] first event raw start:', events[0].start.dateTime);
+    }
+
+    return events;
   } catch(e) {
     console.error('Fetch error:', e);
     return getDemoEvents();
