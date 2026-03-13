@@ -1219,12 +1219,17 @@ const _SRC = {
 };
 
 function _primeAudio() {
+  console.log('[audio] _primeAudio called');
   ['warn1','warn2','end1','end2'].forEach(id => {
     const el = document.getElementById('snd-' + id);
-    if (!el) return;
-    if (!el.src) el.src = _SRC[id];
+    if (!el) { console.warn('[audio] element not found: snd-' + id); return; }
+    el.src = _SRC[id];
     const p = el.play();
-    if (p) p.then(() => { el.pause(); el.currentTime = 0; }).catch(()=>{});
+    if (p) p.then(() => {
+      el.pause();
+      el.currentTime = 0;
+      console.log('[audio] primed:', id);
+    }).catch(e => console.warn('[audio] prime failed:', id, e.message));
   });
 }
 
@@ -1232,10 +1237,12 @@ function _playEl(id, delay) {
   delay = delay || 0;
   setTimeout(function() {
     const el = document.getElementById('snd-' + id);
-    if (!el) return;
-    if (!el.src) el.src = _SRC[id];
+    if (!el) { console.warn('[audio] element not found:', id); return; }
+    console.log('[audio] playing:', id, 'src set:', !!el.src, 'paused:', el.paused);
     el.currentTime = 0;
-    el.play().catch(function(e) { console.warn('[audio]', id, e.message); });
+    const p = el.play();
+    if (p) p.then(() => console.log('[audio] played OK:', id))
+           .catch(e => console.warn('[audio] BLOCKED:', id, e.name, e.message));
   }, delay);
 }
 
