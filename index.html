@@ -809,8 +809,10 @@ function renderEvents(events) {
 
   const nowMs = Date.now();
   grid.innerHTML = events.map(ev => {
-    const startMs = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
-    const endMs   = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
+    // Graph returns times in local timezone (via Prefer header), no Z suffix
+    // new Date("2026-03-13T08:00:00") is parsed as LOCAL time by JS - correct
+    const startMs = parseGraphDateFixed(ev.start.dateTime).getTime();
+    const endMs   = parseGraphDateFixed(ev.end.dateTime).getTime();
     const start = new Date(startMs);
     const end   = new Date(endMs);
     const diffStart = (startMs - nowMs) / 60000;
