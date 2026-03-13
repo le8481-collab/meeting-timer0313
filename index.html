@@ -864,12 +864,11 @@ function activateTimerManual(ev) {
   const now = new Date();
   const schedStart = parseGraphDateFixed(ev.start.dateTime);
   const schedEnd   = parseGraphDateFixed(ev.end.dateTime);
-  const duration   = schedEnd - schedStart; // original duration in ms
+  const duration   = schedEnd - schedStart;
 
-  // If starting early, shift end time to now + original duration
   if (schedStart > now) {
-    const newEnd = new Date(now.getTime() + duration);
-    ev = { ...ev, end: { dateTime: newEnd.toISOString() } };
+    // Starting early: use _endMs to avoid timezone issues
+    ev = { ...ev, _endMs: now.getTime() + duration };
   }
   activateTimer(ev);
 }
@@ -917,7 +916,8 @@ function activateTimer(ev) {
 
 function updateTimer(ev) {
   const now        = new Date();
-  const end        = parseGraphDateFixed(ev.end.dateTime);
+  // Use _endMs override if set (from snooze extension), else parse normally
+  const end        = ev._endMs ? new Date(ev._endMs) : parseGraphDateFixed(ev.end.dateTime);
   const schedStart = parseGraphDateFixed(ev.start.dateTime);
   const start      = ev._manualStart ? new Date(ev._manualStart) : (schedStart > now ? now : schedStart);
   const total      = (end - start) / 1000;
@@ -1046,10 +1046,9 @@ function snoozeReminder() {
 
 function snoozeMinutes(mins) {
   if (!activeEvent) return;
-  // Extend the event's end time by the chosen minutes
-  const currentEnd = parseGraphDateFixed(activeEvent.end.dateTime);
-  const newEnd = new Date(currentEnd.getTime() + mins * 60000);
-  activeEvent.end = { dateTime: newEnd.toISOString() };
+  // Store extended end as ms timestamp to avoid timezone parsing issues
+  const currentEndMs = activeEvent._endMs || parseGraphDateFixed(activeEvent.end.dateTime).getTime();
+  activeEvent._endMs = currentEndMs + mins * 60000;
   // Reset warning so it fires again when new deadline approaches
   warnedEvents.delete(activeEvent.id);
   delete snoozedUntil[activeEvent.id];
@@ -1061,20 +1060,19 @@ function snoozeMinutes(mins) {
 }
 
 function restartTimer(ev) {
-  // Remove from dismissed set so it can be restarted
   dismissedTimers.delete(ev.id);
   warnedEvents.delete(ev.id);
   delete snoozedUntil[ev.id];
-  // For past events, restart with original duration from now
   const origStart = parseGraphDateFixed(ev.start.dateTime);
   const origEnd   = parseGraphDateFixed(ev.end.dateTime);
   const duration  = origEnd - origStart;
   const now = new Date();
-  const newEnd = new Date(now.getTime() + duration);
   const restartedEv = {
     ...ev,
     start: { dateTime: now.toISOString() },
-    end:   { dateTime: newEnd.toISOString() }
+    end:   { dateTime: new Date(now.getTime() + duration).toISOString() },
+    _endMs: now.getTime() + duration,
+    _overtimeSoundPlayed: false
   };
   activateTimer(restartedEv);
 }
@@ -1128,6 +1126,7 @@ function startManualTimer() {
     subject: name,
     start: { dateTime: now.toISOString() },
     end:   { dateTime: end.toISOString() },
+    _endMs: end.getTime(),
     location: { displayName: '' },
     organizer: { emailAddress: { name: '' } }
   };
