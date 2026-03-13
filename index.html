@@ -231,16 +231,9 @@ body {
 }
 
 /* Ring */
-.ring-wrap {
-  position: absolute; top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-.ring-track { fill: none; stroke: rgba(255,255,255,0.04); stroke-width: 2.5; }
-.ring-fill {
-  fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear, stroke 0.5s ease;
-}
+
+
+
 
 .timer-eyebrow {
   font-size: 10px; font-weight: 700; letter-spacing: 2px;
@@ -509,12 +502,6 @@ body {
 
     <!-- Timer -->
     <div id="timer-section">
-      <svg class="ring-wrap" width="340" height="340" viewBox="0 0 340 340">
-        <circle class="ring-track" cx="170" cy="170" r="158"/>
-        <circle class="ring-fill" id="ring-fill" cx="170" cy="170" r="158"
-          stroke-dasharray="992.88" stroke-dashoffset="0"/>
-      </svg>
-
       <div class="timer-eyebrow">⏱ 進行中的會議</div>
       <div id="overtime-badge" class="overtime-badge" style="display:none">⚠ 超時中</div>
       <div class="timer-meeting-name" id="timer-meeting-name">—</div>
@@ -892,10 +879,12 @@ function checkAndActivateTimer(events) {
   if (activeEvent) return;
   const nowMs = Date.now();
   for (const ev of events) {
-    const startUtc = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
-    const endUtc   = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
-    if (startUtc <= nowMs && endUtc > nowMs && !dismissedTimers.has(ev.id)) {
-      const enriched = { ...ev, _endMs: endUtc, _startMs: startUtc };
+    // Use local-parsed times (Taiwan) for live detection
+    const startLocal = parseGraphDateFixed(ev.start.dateTime).getTime();
+    const endLocal   = parseGraphDateFixed(ev.end.dateTime).getTime();
+    if (startLocal <= nowMs && endLocal > nowMs && !dismissedTimers.has(ev.id)) {
+      const remaining = endLocal - nowMs;
+      const enriched = { ...ev, _endMs: nowMs + remaining, _startMs: nowMs };
       activateTimer(enriched);
       break;
     }
@@ -950,7 +939,6 @@ function updateTimer(ev, t) {
   const section  = document.getElementById('timer-section');
   const timerEl  = document.getElementById('timer-display');
   const fillEl   = document.getElementById('elapsed-fill');
-  const ring     = document.getElementById('ring-fill');
   const badge    = document.getElementById('overtime-badge');
   const subEl    = document.getElementById('timer-sub');
   const labelEl  = document.getElementById('elapsed-label-text');
@@ -966,9 +954,7 @@ function updateTimer(ev, t) {
     section.className = 'state-danger';
     subEl.textContent = '超時中';
     badge.style.display = 'inline-block';
-    ring.style.stroke = 'var(--rose)';
-    ring.style.strokeDashoffset = '0';
-    fillEl.style.width = '100%';
+        fillEl.style.width = '100%';
     fillEl.style.background = 'var(--rose)';
     labelEl.textContent = '超時';
     document.getElementById('elapsed-pct').textContent = '+' + Math.round(overtimeSecs/60) + ' 分';
@@ -1002,9 +988,7 @@ function updateTimer(ev, t) {
     fillEl.style.background = barColor;
     document.getElementById('elapsed-pct').textContent = pctInt + '%';
 
-    ring.style.stroke = ringColor;
-    ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
-
+    
     if (remaining <= warnSecs) {
       timerEl.className = 'timer-display warning';
       section.className = 'state-warning';
@@ -1023,6 +1007,12 @@ function updateTimer(ev, t) {
       timerEl.className = 'timer-display normal';
       section.className = 'state-active';
       subEl.textContent = '剩餘時間';
+    }
+    // Always update the displayed time (was missing!)
+    if (!isOvertime) {
+      const rm = Math.floor(remaining / 60);
+      const rs = Math.floor(remaining % 60);
+      timerEl.textContent = String(rm).padStart(2,'0') + ':' + String(rs).padStart(2,'0');
     }
   }
 }
@@ -1081,10 +1071,7 @@ function restartTimer(ev) {
   warnedEvents.delete(ev.id);
   delete snoozedUntil[ev.id];
   const nowMs = Date.now();
-  const s = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
-  const e = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
-  let duration = e - s;
-  if (duration <= 0 || duration > 24 * 3600000) duration = 30 * 60000;
+  const duration = getDurationMs(ev);
   const restartedEv = { ...ev, _endMs: nowMs + duration, _startMs: nowMs, _overtimeSoundPlayed: false };
   activateTimer(restartedEv);
 }
