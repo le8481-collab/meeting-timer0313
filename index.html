@@ -1105,6 +1105,16 @@ function snoozeMinutes(mins) {
   showToast(`已延後 ${mins} 分鐘`, '⏰');
 }
 
+function getDurationMs(ev) {
+  try {
+    const sStr = ev.start.dateTime.replace(/[Zz]$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+    const eStr = ev.end.dateTime.replace(/[Zz]$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+    const duration = new Date(eStr) - new Date(sStr);
+    if (duration > 0 && duration <= 24 * 3600000) return duration;
+  } catch(e) {}
+  return 30 * 60000;
+}
+
 function activateTimerById(id) {
   const ev = eventsMap[id];
   if (ev) activateTimerManual(ev);
