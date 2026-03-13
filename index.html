@@ -787,8 +787,16 @@ function renderEvents(events) {
 
 // ===== Timer =====
 function activateTimerManual(ev) {
-  // Allow starting any non-past event manually
-  // Override the end time if starting early (use original end time)
+  const now = new Date();
+  const schedStart = parseGraphDateFixed(ev.start.dateTime);
+  const schedEnd   = parseGraphDateFixed(ev.end.dateTime);
+  const duration   = schedEnd - schedStart; // original duration in ms
+
+  // If starting early, shift end time to now + original duration
+  if (schedStart > now) {
+    const newEnd = new Date(now.getTime() + duration);
+    ev = { ...ev, end: { dateTime: newEnd.toISOString() } };
+  }
   activateTimer(ev);
 }
 
