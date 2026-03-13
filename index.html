@@ -732,20 +732,12 @@ function parseGraphDate(dt) {
 
 function parseGraphDateFixed(dt) {
   if (!dt) return new Date();
-  // Graph with Prefer: outlook.timezone header returns dateTime WITHOUT tz suffix
-  // in the user's local timezone. Parse as local time using browser offset.
-  if (dt.endsWith('Z') || dt.includes('+')) {
-    // Has explicit UTC or offset - parse directly
-    return new Date(dt);
-  }
-  if (dt.lastIndexOf('-') > 7) {
-    // Has negative offset like 2026-03-13T09:00:00-05:00
-    return new Date(dt);
-  }
-  // No suffix: Graph returned in local timezone. Parse as local time.
-  // Use the browser's current offset to convert to UTC correctly.
-  const localDate = new Date(dt); // JS parses no-tz as LOCAL time - correct!
-  return localDate;
+  // Strip fractional seconds (.0000000) that Graph sometimes appends
+  const clean = dt.replace(/\.\d+/, '');
+  // With Prefer: outlook.timezone, Graph returns times in local tz WITHOUT suffix
+  // JS new Date("2026-03-13T09:00:00") parses as LOCAL time = correct!
+  // If it has Z or offset, parse directly
+  return new Date(clean);
 }
 
 async function fetchOutlookEvents() {
@@ -756,12 +748,14 @@ async function fetchOutlookEvents() {
     // Get browser's IANA timezone (e.g. "Asia/Taipei")
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    // Build today's range in local time
+    // Graph calendarView needs local date in ISO format WITHOUT timezone suffix
+    // so Graph treats it as the user's mailbox timezone (set via Prefer header)
     const pad = n => String(n).padStart(2,'0');
-    const d = new Date();
-    const localStart = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T00:00:00`;
-    const localEnd   = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T23:59:59`;
-    const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${localStart}&endDateTime=${localEnd}&$select=subject,start,end,location,organizer,id&$orderby=start/dateTime&$top=20`;
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+    const startStr = `${y}-${pad(m)}-${pad(d)}T00:00:00`;
+    const endStr   = `${y}-${pad(m)}-${pad(d)}T23:59:59`;
+    const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${startStr}&endDateTime=${endStr}&$select=subject,start,end,location,organizer,id&$orderby=start/dateTime&$top=50`;
 
     const resp = await fetch(url, {
       headers: {
