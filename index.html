@@ -189,6 +189,7 @@ body {
 
 .snooze-options-panel { display: none; }
 @keyframes pulse-btn { 0%,100%{opacity:1} 50%{opacity:0.7} }
+@keyframes pulse-overlay { 0%,100%{background:rgba(220,50,50,0.15)} 50%{background:rgba(220,50,50,0.30)} }
 .snooze-options-panel.visible { display: flex; }
 .btn-primary {
   background: var(--accent); border-color: var(--accent); color: white;
@@ -577,6 +578,15 @@ body {
       <button class="btn" onclick="closeManualTimer()">取消</button>
       <button class="btn btn-primary" onclick="startManualTimer()">▶ 開始</button>
     </div>
+  </div>
+</div>
+
+<!-- Touch overlay for iOS audio (triggers on next user touch) -->
+<div id="touch-overlay" onclick="touchOverlayFired()" ontouchstart="touchOverlayFired()" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:8888;background:rgba(220,50,50,0.15);backdrop-filter:blur(2px);cursor:pointer;">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);border-radius:20px;padding:24px 40px;text-align:center;color:#fff;">
+    <div style="font-size:48px;margin-bottom:12px">🔔</div>
+    <div style="font-size:20px;font-weight:700" id="touch-overlay-title">會議提醒</div>
+    <div style="font-size:14px;margin-top:8px;color:#aaa" id="touch-overlay-msg">點擊任何地方聽提醒聲音</div>
   </div>
 </div>
 
@@ -1015,8 +1025,9 @@ function updateTimer(ev, t) {
       ev._overtimeSoundPlayed = true;
       fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
       document.getElementById('snooze-options').classList.add('visible');
-      _primeAudio();
-      setTimeout(() => playEndSound(), 300);
+      _playEl('end1', 0);
+      _playEl('end2', 450);
+      showTouchAlert('end', '⏰ ' + (ev.subject || '會議'), '時間到！點此聽提醒聲');
     }
   } else {
     badge.style.display = 'none';
@@ -1057,8 +1068,11 @@ function updateTimer(ev, t) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        _primeAudio();
-        setTimeout(() => vibrateAndBeep(), 300);
+        // Try direct play first; if blocked show touch overlay
+        _playEl('warn1', 0);
+        _playEl('warn2', 380);
+        // Also show touch overlay as fallback for iOS
+        showTouchAlert('warn', '⚠ ' + (ev.subject || '會議'), '還剩 ' + Math.ceil(remaining/60) + ' 分鐘，點此聽提醒聲');
       }
     } else {
       timerEl.className = 'timer-display normal';
@@ -1271,6 +1285,29 @@ async function playEndSound() {
   _playEl('end2', 450);
   return true;
 }
+
+let _pendingAlertType = null;
+
+function showTouchAlert(type, title, msg) {
+  _pendingAlertType = type;
+  const overlay = document.getElementById('touch-overlay');
+  document.getElementById('touch-overlay-title').textContent = title || '會議提醒';
+  document.getElementById('touch-overlay-msg').textContent = msg || '點擊任何地方聽提醒聲音';
+  overlay.style.display = 'block';
+}
+
+function touchOverlayFired() {
+  document.getElementById('touch-overlay').style.display = 'none';
+  _pendingAlertType = null;
+  vibrateAndBeep();
+}
+
+async function testSound() {
+  vibrateAndBeep();
+}
+
+function showTapAlert() {}
+function tapAlertSound() { vibrateAndBeep(); }
 
 // Prime audio on first gesture
 ['click','touchstart','touchend'].forEach(function(e) {
@@ -1607,8 +1644,9 @@ function updateTimer(ev, t) {
       ev._overtimeSoundPlayed = true;
       fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
       document.getElementById('snooze-options').classList.add('visible');
-      _primeAudio();
-      setTimeout(() => playEndSound(), 300);
+      _playEl('end1', 0);
+      _playEl('end2', 450);
+      showTouchAlert('end', '⏰ ' + (ev.subject || '會議'), '時間到！點此聽提醒聲');
     }
   } else {
     badge.style.display = 'none';
@@ -1649,8 +1687,11 @@ function updateTimer(ev, t) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        _primeAudio();
-        setTimeout(() => vibrateAndBeep(), 300);
+        // Try direct play first; if blocked show touch overlay
+        _playEl('warn1', 0);
+        _playEl('warn2', 380);
+        // Also show touch overlay as fallback for iOS
+        showTouchAlert('warn', '⚠ ' + (ev.subject || '會議'), '還剩 ' + Math.ceil(remaining/60) + ' 分鐘，點此聽提醒聲');
       }
     } else {
       timerEl.className = 'timer-display normal';
