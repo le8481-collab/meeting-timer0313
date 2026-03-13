@@ -857,9 +857,9 @@ function renderEvents(events) {
           </div>
         </div>
         <div class="ev-action">
-          ${isLive && !dismissedTimers.has(ev.id) ? `<button class="btn btn-primary" onclick="activateTimerById('${ev.id}')">⏱ 計時</button>` : ''}
-          ${!isLive && !isPast ? `<button class="btn" onclick="activateTimerById('${ev.id}')">⏱ 提早開始</button>` : ''}
-          ${isPast || dismissedTimers.has(ev.id) ? `<button class="btn" style="border-color:var(--text-muted);color:var(--text-muted)" onclick="restartTimerById('${ev.id}')">↺ 重啟</button>` : ''}
+          ${isLive && !dismissedTimers.has(ev.id) ? `<button class="btn btn-primary" onclick="activateTimerById(this.dataset.id)" data-id="${ev.id}">⏱ 計時</button>` : ''}
+          ${!isLive && !isPast ? `<button class="btn" onclick="activateTimerById(this.dataset.id)" data-id="${ev.id}">⏱ 提早開始</button>` : ''}
+          ${isPast || dismissedTimers.has(ev.id) ? `<button class="btn" style="border-color:var(--text-muted);color:var(--text-muted)" onclick="restartTimerById(this.dataset.id)" data-id="${ev.id}">↺ 重啟</button>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -1121,8 +1121,12 @@ function activateTimerById(id) {
 }
 
 function restartTimerById(id) {
+  console.log('[restart] id:', id);
+  console.log('[restart] eventsMap keys:', Object.keys(eventsMap));
   const ev = eventsMap[id];
+  console.log('[restart] ev found:', !!ev);
   if (ev) restartTimer(ev);
+  else console.error('[restart] event not found in eventsMap!');
 }
 
 function restartTimer(ev) {
