@@ -659,10 +659,13 @@ function parseGraphDate(dt) {
 
 function parseGraphDateFixed(dt) {
   if (!dt) return new Date();
-  if (dt.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dt)) return new Date(dt);
-  // No TZ: browser local time - get offset and apply
-  const local = new Date(dt.replace('T', ' '));
-  return isNaN(local) ? new Date(dt) : local;
+  // With Prefer header, Graph returns times in Asia/Taipei
+  // If no timezone suffix, treat as local (Taiwan) time
+  if (dt.endsWith('Z') || dt.includes('+') || (dt.lastIndexOf('-') > 7)) {
+    return new Date(dt);
+  }
+  // No TZ suffix: append +08:00 for Taiwan
+  return new Date(dt + '+08:00');
 }
 
 async function fetchOutlookEvents() {
@@ -681,7 +684,11 @@ async function fetchOutlookEvents() {
     const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${localStart}&endDateTime=${localEnd}&$select=subject,start,end,location,organizer,id&$orderby=start/dateTime&$top=20`;
 
     const resp = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Prefer': 'outlook.timezone="Asia/Taipei"'
+      }
     });
     if (!resp.ok) throw new Error('API ' + resp.status);
     const data = await resp.json();
