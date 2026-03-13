@@ -612,6 +612,8 @@ let warnedEvents = new Set();
 let dismissedTimers = new Set();
 let snoozedUntil = {};
 let currentEvents = [];
+let timerEndMs = 0;
+let timerStartMs = 0;
 
 // Ring circumference for r=158: 2*π*158 ≈ 992.88
 const CIRCUMFERENCE = 992.88;
@@ -808,15 +810,17 @@ function renderEvents(events) {
     return;
   }
 
-  const now = new Date();
+  const nowMs = Date.now();
   grid.innerHTML = events.map(ev => {
-    const start = parseGraphDateFixed(ev.start.dateTime);
-    const end   = parseGraphDateFixed(ev.end.dateTime);
-    const diffStart = (start - now) / 60000;
-    const duration  = Math.round((end - start) / 60000);
-    const isLive    = start <= now && end > now;
+    const startMs = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
+    const endMs   = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
+    const start = new Date(startMs);
+    const end   = new Date(endMs);
+    const diffStart = (startMs - nowMs) / 60000;
+    const duration  = Math.round((endMs - startMs) / 60000);
+    const isLive    = startMs <= nowMs && endMs > nowMs;
     const isSoon    = diffStart > 0 && diffStart <= 15;
-    const isPast    = end <= now;
+    const isPast    = endMs <= nowMs;
 
     let cardCls = 'event-card upcoming';
     let tag = `<span class="tag tag-upcoming">即將開始</span>`;
@@ -861,23 +865,12 @@ function renderEvents(events) {
 
 // ===== Timer =====
 function activateTimerManual(ev) {
-  const now = new Date();
-  const schedStart = parseGraphDateFixed(ev.start.dateTime);
-  const schedEnd   = parseGraphDateFixed(ev.end.dateTime);
-  let duration = schedEnd - schedStart;
-
-  // Fallback: if duration looks wrong, try to extract from display (ev might have bad tz)
-  // Use absolute value and ensure minimum 5 min
-  if (duration <= 0 || duration > 24 * 3600000) {
-    // Try parsing as UTC directly
-    const s = new Date(ev.start.dateTime + (ev.start.dateTime.endsWith('Z') ? '' : 'Z'));
-    const e = new Date(ev.end.dateTime + (ev.end.dateTime.endsWith('Z') ? '' : 'Z'));
-    duration = e - s;
-  }
-  if (duration <= 0) duration = 30 * 60000; // fallback 30min
-
-  // Always set _endMs from now + duration when starting manually
-  ev = { ...ev, _endMs: now.getTime() + duration };
+  const nowMs = Date.now();
+  const s = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z');
+  const e = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z');
+  let duration = e - s;
+  if (duration <= 0 || duration > 24 * 3600000) duration = 30 * 60000;
+  ev = { ...ev, _endMs: nowMs + duration, _startMs: nowMs };
   activateTimer(ev);
 }
 
@@ -896,34 +889,34 @@ function endEarly() {
 
 function checkAndActivateTimer(events) {
   if (!events) return;
-  // Never auto-start if there's already an active timer (including overtime)
   if (activeEvent) return;
-  const now = new Date();
+  const nowMs = Date.now();
   for (const ev of events) {
-    const start = parseGraphDateFixed(ev.start.dateTime);
-    const end   = parseGraphDateFixed(ev.end.dateTime);
-    if (start <= now && end > now && !dismissedTimers.has(ev.id)) {
-      activateTimer(ev);
+    const startUtc = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
+    const endUtc   = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
+    if (startUtc <= nowMs && endUtc > nowMs && !dismissedTimers.has(ev.id)) {
+      const enriched = { ...ev, _endMs: endUtc, _startMs: startUtc };
+      activateTimer(enriched);
       break;
     }
   }
 }
 
 function activateTimer(ev) {
-  const now = Date.now();
-  ev._manualStart = now;
-  // Always ensure _endMs is set as a reliable ms timestamp
-  if (!ev._endMs) {
-    ev._endMs = parseGraphDateFixed(ev.end.dateTime).getTime();
+  // Compute end time in ms - try _endMs first, then parse dateTime as UTC
+  if (ev._endMs && ev._endMs > 0) {
+    timerEndMs = ev._endMs;
+  } else {
+    const dtStr = ev.end.dateTime;
+    const utcStr = dtStr.endsWith('Z') ? dtStr : dtStr + 'Z';
+    timerEndMs = new Date(utcStr).getTime();
+    // If still in past or invalid, use now + 30min as fallback
+    if (!timerEndMs || timerEndMs < Date.now() - 24*3600000) {
+      timerEndMs = Date.now() + 30 * 60000;
+    }
   }
-  // If _endMs is already in the past (e.g. restarting a past meeting),
-  // reset to now + original duration
-  if (ev._endMs <= now) {
-    const origStart = parseGraphDateFixed(ev.start.dateTime).getTime();
-    const origEnd   = ev._endMs;
-    const duration  = Math.max(origEnd - origStart, 30 * 60000); // min 30min
-    ev._endMs = now + duration;
-  }
+  timerStartMs = ev._startMs || Date.now();
+
   activeEvent = ev;
   const section = document.getElementById('timer-section');
   section.style.display = 'block';
@@ -933,22 +926,26 @@ function activateTimer(ev) {
   document.getElementById('snooze-btn').style.display = 'none';
   document.getElementById('timer-meeting-name').textContent = ev.subject || '（無標題）';
   if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => updateTimer(ev), 1000);
-  updateTimer(ev);
+  timerInterval = setInterval(tickTimer, 1000);
+  tickTimer();
 }
 
-function updateTimer(ev) {
-  const now        = new Date();
-  // Use _endMs override if set (from snooze extension), else parse normally
-  const end        = ev._endMs ? new Date(ev._endMs) : parseGraphDateFixed(ev.end.dateTime);
-  const schedStart = parseGraphDateFixed(ev.start.dateTime);
-  const start      = ev._manualStart ? new Date(ev._manualStart) : (schedStart > now ? now : schedStart);
-  const total      = (end - start) / 1000;
-  const rawRemain  = (end - now) / 1000; // can be negative = overtime
+function tickTimer() {
+  if (!activeEvent) return;
+  const now = Date.now();
+  const rawRemain = (timerEndMs - now) / 1000;
+  const total = (timerEndMs - timerStartMs) / 1000;
   const isOvertime = rawRemain < 0;
-  const remaining  = Math.max(0, rawRemain);
-  const elapsed    = Math.max(0, total - remaining);
-  const pct        = Math.min(1, total > 0 ? elapsed / total : 0);
+  const remaining = Math.max(0, rawRemain);
+  const elapsed = Math.max(0, total - remaining);
+  const pct = total > 0 ? Math.min(1, elapsed / total) : 0;
+  updateTimer(activeEvent, { now, rawRemain, total, isOvertime, remaining, elapsed, pct });
+}
+
+function updateTimer(ev, t) {
+  // t = precomputed timing from tickTimer
+  if (!t) return;
+  const { rawRemain, total, isOvertime, remaining, elapsed, pct } = t;
 
   const section  = document.getElementById('timer-section');
   const timerEl  = document.getElementById('timer-display');
@@ -1069,10 +1066,7 @@ function snoozeReminder() {
 
 function snoozeMinutes(mins) {
   if (!activeEvent) return;
-  // Store extended end as ms timestamp to avoid timezone parsing issues
-  const currentEndMs = activeEvent._endMs || parseGraphDateFixed(activeEvent.end.dateTime).getTime();
-  activeEvent._endMs = currentEndMs + mins * 60000;
-  // Reset warning so it fires again when new deadline approaches
+  timerEndMs = timerEndMs + mins * 60000;
   warnedEvents.delete(activeEvent.id);
   delete snoozedUntil[activeEvent.id];
   delete activeEvent._overtimeSoundPlayed;
@@ -1086,17 +1080,12 @@ function restartTimer(ev) {
   dismissedTimers.delete(ev.id);
   warnedEvents.delete(ev.id);
   delete snoozedUntil[ev.id];
-  const origStart = parseGraphDateFixed(ev.start.dateTime);
-  const origEnd   = parseGraphDateFixed(ev.end.dateTime);
-  const duration  = origEnd - origStart;
-  const now = new Date();
-  const restartedEv = {
-    ...ev,
-    start: { dateTime: now.toISOString() },
-    end:   { dateTime: new Date(now.getTime() + duration).toISOString() },
-    _endMs: now.getTime() + duration,
-    _overtimeSoundPlayed: false
-  };
+  const nowMs = Date.now();
+  const s = new Date(ev.start.dateTime.endsWith('Z') ? ev.start.dateTime : ev.start.dateTime + 'Z').getTime();
+  const e = new Date(ev.end.dateTime.endsWith('Z') ? ev.end.dateTime : ev.end.dateTime + 'Z').getTime();
+  let duration = e - s;
+  if (duration <= 0 || duration > 24 * 3600000) duration = 30 * 60000;
+  const restartedEv = { ...ev, _endMs: nowMs + duration, _startMs: nowMs, _overtimeSoundPlayed: false };
   activateTimer(restartedEv);
 }
 
@@ -1149,7 +1138,7 @@ function startManualTimer() {
     subject: name,
     start: { dateTime: now.toISOString() },
     end:   { dateTime: end.toISOString() },
-    _endMs: end.getTime(),
+    _endMs: now.getTime() + mins * 60000,
     location: { displayName: '' },
     organizer: { emailAddress: { name: '' } }
   };
