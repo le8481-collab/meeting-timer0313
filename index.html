@@ -902,12 +902,27 @@ function checkAndActivateTimer(events) {
 }
 
 function activateTimer(ev) {
-  // Tag with manual start time for early-start progress tracking
-  ev._manualStart = Date.now();
+  const now = Date.now();
+  ev._manualStart = now;
+  // Always ensure _endMs is set as a reliable ms timestamp
+  if (!ev._endMs) {
+    ev._endMs = parseGraphDateFixed(ev.end.dateTime).getTime();
+  }
+  // If _endMs is already in the past (e.g. restarting a past meeting),
+  // reset to now + original duration
+  if (ev._endMs <= now) {
+    const origStart = parseGraphDateFixed(ev.start.dateTime).getTime();
+    const origEnd   = ev._endMs;
+    const duration  = Math.max(origEnd - origStart, 30 * 60000); // min 30min
+    ev._endMs = now + duration;
+  }
   activeEvent = ev;
   const section = document.getElementById('timer-section');
   section.style.display = 'block';
   section.className = 'state-active';
+  document.getElementById('overtime-badge').style.display = 'none';
+  document.getElementById('snooze-options').style.display = 'none';
+  document.getElementById('snooze-btn').style.display = 'none';
   document.getElementById('timer-meeting-name').textContent = ev.subject || '（無標題）';
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => updateTimer(ev), 1000);
