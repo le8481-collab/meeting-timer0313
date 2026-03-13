@@ -864,12 +864,20 @@ function activateTimerManual(ev) {
   const now = new Date();
   const schedStart = parseGraphDateFixed(ev.start.dateTime);
   const schedEnd   = parseGraphDateFixed(ev.end.dateTime);
-  const duration   = schedEnd - schedStart;
+  let duration = schedEnd - schedStart;
 
-  if (schedStart > now) {
-    // Starting early: use _endMs to avoid timezone issues
-    ev = { ...ev, _endMs: now.getTime() + duration };
+  // Fallback: if duration looks wrong, try to extract from display (ev might have bad tz)
+  // Use absolute value and ensure minimum 5 min
+  if (duration <= 0 || duration > 24 * 3600000) {
+    // Try parsing as UTC directly
+    const s = new Date(ev.start.dateTime + (ev.start.dateTime.endsWith('Z') ? '' : 'Z'));
+    const e = new Date(ev.end.dateTime + (ev.end.dateTime.endsWith('Z') ? '' : 'Z'));
+    duration = e - s;
   }
+  if (duration <= 0) duration = 30 * 60000; // fallback 30min
+
+  // Always set _endMs from now + duration when starting manually
+  ev = { ...ev, _endMs: now.getTime() + duration };
   activateTimer(ev);
 }
 
