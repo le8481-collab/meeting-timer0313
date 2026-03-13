@@ -1014,9 +1014,8 @@ function updateTimer(ev, t) {
       ev._overtimeSoundPlayed = true;
       fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
       document.getElementById('snooze-options').classList.add('visible');
-      playEndSound().then(played => {
-        if (!played) showTapAlert('end');
-      });
+      _primeAudio();
+      setTimeout(() => playEndSound(), 300);
     }
   } else {
     badge.style.display = 'none';
@@ -1057,9 +1056,8 @@ function updateTimer(ev, t) {
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
         // Try auto-play; if blocked (iOS), show tap-to-alert button
-        vibrateAndBeep().then(played => {
-          if (!played) showTapAlert('warn');
-        });
+        _primeAudio();
+        setTimeout(() => vibrateAndBeep(), 300);
       }
     } else {
       timerEl.className = 'timer-display normal';
@@ -1607,9 +1605,8 @@ function updateTimer(ev, t) {
       ev._overtimeSoundPlayed = true;
       fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！可延後或結束會議。');
       document.getElementById('snooze-options').classList.add('visible');
-      playEndSound().then(played => {
-        if (!played) showTapAlert('end');
-      });
+      _primeAudio();
+      setTimeout(() => playEndSound(), 300);
     }
   } else {
     badge.style.display = 'none';
@@ -1650,9 +1647,8 @@ function updateTimer(ev, t) {
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
         // Try auto-play; if blocked (iOS), show tap-to-alert button
-        vibrateAndBeep().then(played => {
-          if (!played) showTapAlert('warn');
-        });
+        _primeAudio();
+        setTimeout(() => vibrateAndBeep(), 300);
       }
     } else {
       timerEl.className = 'timer-display normal';
