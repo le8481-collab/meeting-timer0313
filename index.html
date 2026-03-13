@@ -366,6 +366,47 @@ body {
 /* ── Divider ── */
 .divider { height: 1px; background: var(--border); margin: 32px 0; }
 
+/* ── Overtime ── */
+.timer-display.overtime {
+  color: var(--rose);
+  animation: timerFlash 0.8s infinite;
+}
+.overtime-badge {
+  display: inline-block;
+  background: var(--rose-dim);
+  color: var(--rose);
+  border: 1px solid rgba(240,98,146,0.3);
+  border-radius: 6px;
+  font-size: 11px; font-weight: 700;
+  padding: 2px 10px; margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+/* ── Manual Timer Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  z-index: 500; display: none;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: 32px; width: 360px;
+  max-width: 90vw;
+}
+.modal-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 20px;
+}
+.modal-row { display: flex; gap: 10px; margin-bottom: 14px; }
+.modal-row .field { flex: 1; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .steps-grid { grid-template-columns: 1fr; }
@@ -475,13 +516,14 @@ body {
       </svg>
 
       <div class="timer-eyebrow">⏱ 進行中的會議</div>
+      <div id="overtime-badge" class="overtime-badge" style="display:none">⚠ 超時中</div>
       <div class="timer-meeting-name" id="timer-meeting-name">—</div>
       <div class="timer-display normal" id="timer-display">00:00</div>
       <div class="timer-sub" id="timer-sub">剩餘時間</div>
 
       <div class="elapsed-bar-wrap">
         <div class="elapsed-label">
-          <span>已進行</span>
+          <span id="elapsed-label-text">已進行</span>
           <span id="elapsed-pct">0%</span>
         </div>
         <div class="elapsed-track">
@@ -491,7 +533,7 @@ body {
 
       <div class="timer-controls">
         <button class="btn" onclick="dismissTimer()">✕ 關閉</button>
-        <button class="btn" onclick="endEarly()" style="border-color:var(--rose);color:var(--rose)">⏹ 提早結束</button>
+        <button class="btn" onclick="endEarly()" style="border-color:var(--rose);color:var(--rose)">⏹ 結束會議</button>
         <button class="btn btn-primary" id="snooze-btn" onclick="snoozeReminder()" style="display:none">⏰ 延後 2 分鐘</button>
       </div>
     </div>
@@ -501,6 +543,7 @@ body {
       <div class="section-title">今日會議</div>
       <div class="section-meta">
         <span class="refresh-time" id="refresh-time"></span>
+        <button class="btn" onclick="openManualTimer()" style="padding:6px 12px;font-size:11px">⏱ 手動計時</button>
         <button class="btn" id="refresh-btn" onclick="refreshEvents()" style="padding:6px 12px;font-size:11px">↻ 重新整理</button>
         <span class="count-badge" id="event-count">—</span>
       </div>
@@ -511,6 +554,29 @@ body {
 
   </div>
 
+</div>
+
+<!-- Manual Timer Modal -->
+<div class="modal-overlay" id="manual-modal">
+  <div class="modal-box">
+    <div class="modal-title">⏱ 手動計時</div>
+    <div class="modal-row">
+      <div class="field">
+        <label>會議名稱</label>
+        <input id="manual-name" class="input-field" type="text" placeholder="會議名稱（選填）" />
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="field">
+        <label>時長（分鐘）</label>
+        <input id="manual-minutes" class="input-field" type="number" value="30" min="1" max="480" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeManualTimer()">取消</button>
+      <button class="btn btn-primary" onclick="startManualTimer()">▶ 開始</button>
+    </div>
+  </div>
 </div>
 
 <!-- Notification -->
@@ -817,11 +883,13 @@ function endEarly() {
 
 function checkAndActivateTimer(events) {
   if (!events) return;
+  // Never auto-start if there's already an active timer (including overtime)
+  if (activeEvent) return;
   const now = new Date();
   for (const ev of events) {
     const start = parseGraphDateFixed(ev.start.dateTime);
     const end   = parseGraphDateFixed(ev.end.dateTime);
-    if (start <= now && end > now && !dismissedTimers.has(ev.id) && (!activeEvent || activeEvent.id !== ev.id)) {
+    if (start <= now && end > now && !dismissedTimers.has(ev.id)) {
       activateTimer(ev);
       break;
     }
@@ -842,65 +910,113 @@ function activateTimer(ev) {
 }
 
 function updateTimer(ev) {
-  const now       = new Date();
-  const end       = parseGraphDateFixed(ev.end.dateTime);
+  const now        = new Date();
+  const end        = parseGraphDateFixed(ev.end.dateTime);
   const schedStart = parseGraphDateFixed(ev.start.dateTime);
-  // If started early, use activation time as start for progress calculation
-  const start     = ev._manualStart ? new Date(ev._manualStart) : (schedStart > now ? now : schedStart);
-  const total     = (end - start) / 1000;
-  const remaining = Math.max(0, (end - now) / 1000);
-  const elapsed   = Math.max(0, total - remaining);
-  const pct       = Math.min(1, total > 0 ? elapsed / total : 0);
+  const start      = ev._manualStart ? new Date(ev._manualStart) : (schedStart > now ? now : schedStart);
+  const total      = (end - start) / 1000;
+  const rawRemain  = (end - now) / 1000; // can be negative = overtime
+  const isOvertime = rawRemain < 0;
+  const remaining  = Math.max(0, rawRemain);
+  const elapsed    = Math.max(0, total - remaining);
+  const pct        = Math.min(1, total > 0 ? elapsed / total : 0);
 
-  // Clock display
-  const mins = Math.floor(remaining / 60);
-  const secs = Math.floor(remaining % 60);
-  document.getElementById('timer-display').textContent =
-    String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
-
-  // Elapsed bar
-  const pctInt = Math.round(pct * 100);
-  document.getElementById('elapsed-fill').style.width = pctInt + '%';
-  document.getElementById('elapsed-pct').textContent = pctInt + '%';
-
-  // Ring
-  const ring = document.getElementById('ring-fill');
-  ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
-
-  const section = document.getElementById('timer-section');
-  const timerEl = document.getElementById('timer-display');
-  const fillEl  = document.getElementById('elapsed-fill');
+  const section  = document.getElementById('timer-section');
+  const timerEl  = document.getElementById('timer-display');
+  const fillEl   = document.getElementById('elapsed-fill');
+  const ring     = document.getElementById('ring-fill');
+  const badge    = document.getElementById('overtime-badge');
+  const subEl    = document.getElementById('timer-sub');
+  const labelEl  = document.getElementById('elapsed-label-text');
   const warnSecs = WARNING_MINUTES * 60;
 
-  if (remaining <= 0) {
-    timerEl.className = 'timer-display danger';
+  if (isOvertime) {
+    // Overtime: count UP from 00:00, show red
+    const overtimeSecs = Math.abs(rawRemain);
+    const om = Math.floor(overtimeSecs / 60);
+    const os = Math.floor(overtimeSecs % 60);
+    timerEl.textContent = '+' + String(om).padStart(2,'0') + ':' + String(os).padStart(2,'0');
+    timerEl.className = 'timer-display overtime';
     section.className = 'state-danger';
-    document.getElementById('timer-sub').textContent = '⚠ 會議時間已到';
+    subEl.textContent = '超時中';
+    badge.style.display = 'inline-block';
     ring.style.stroke = 'var(--rose)';
+    ring.style.strokeDashoffset = '0';
+    fillEl.style.width = '100%';
     fillEl.style.background = 'var(--rose)';
-  } else if (remaining <= warnSecs) {
-    timerEl.className = 'timer-display warning';
-    section.className = 'state-warning';
-    ring.style.stroke = 'var(--amber)';
-    fillEl.style.background = 'var(--amber)';
-    document.getElementById('timer-sub').textContent = `⚠ 剩餘 ${Math.ceil(remaining/60)} 分鐘`;
+    labelEl.textContent = '超時';
+    document.getElementById('elapsed-pct').textContent = '+' + Math.round(overtimeSecs/60) + ' 分';
 
-    const snoozeTime = snoozedUntil[ev.id];
-    const shouldWarn = !warnedEvents.has(ev.id) || (snoozeTime && now >= snoozeTime);
-    if (shouldWarn) {
-      warnedEvents.add(ev.id);
-      delete snoozedUntil[ev.id];
-      fireNotification(`⚠ ${ev.subject}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-      document.getElementById('snooze-btn').style.display = 'inline-flex';
-      vibrateAndBeep();
+    // Play end sound once when overtime starts
+    if (!ev._overtimeSoundPlayed) {
+      ev._overtimeSoundPlayed = true;
+      playEndSound();
+      fireNotification(`⏰ ${ev.subject || '會議'}`, '時間已到！請結束會議。');
     }
   } else {
-    timerEl.className = 'timer-display normal';
-    section.className = 'state-active';
-    ring.style.stroke = 'var(--accent)';
-    fillEl.style.background = 'var(--accent)';
-    document.getElementById('timer-sub').textContent = '剩餘時間';
+    badge.style.display = 'none';
+    labelEl.textContent = '已進行';
+
+    // Progress bar & ring color: green→yellow→red based on pct
+    let barColor, ringColor;
+    if (pct < 0.6) {
+      barColor = 'var(--emerald)';
+      ringColor = 'var(--emerald)';
+    } else if (pct < 0.85) {
+      barColor = 'var(--amber)';
+      ringColor = 'var(--amber)';
+    } else {
+      barColor = 'var(--rose)';
+      ringColor = 'var(--rose)';
+    }
+
+    const pctInt = Math.round(pct * 100);
+    fillEl.style.width = pctInt + '%';
+    fillEl.style.background = barColor;
+    document.getElementById('elapsed-pct').textContent = pctInt + '%';
+
+    ring.style.stroke = ringColor;
+    ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
+
+    if (remaining <= warnSecs) {
+      timerEl.className = 'timer-display warning';
+      section.className = 'state-warning';
+      subEl.textContent = `⚠ 剩餘 ${Math.ceil(remaining/60)} 分鐘`;
+
+      const snoozeTime = snoozedUntil[ev.id];
+      const shouldWarn = !warnedEvents.has(ev.id) || (snoozeTime && now >= snoozeTime);
+      if (shouldWarn) {
+        warnedEvents.add(ev.id);
+        delete snoozedUntil[ev.id];
+        fireNotification(`⚠ ${ev.subject}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
+        document.getElementById('snooze-btn').style.display = 'inline-flex';
+        vibrateAndBeep();
+      }
+    } else {
+      timerEl.className = 'timer-display normal';
+      section.className = 'state-active';
+      subEl.textContent = '剩餘時間';
+    }
   }
+}
+
+// End sound: gentle double-beep
+function playEndSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.35].forEach(delay => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660, ctx.currentTime + delay);
+      gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+      gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + delay + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.5);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.5);
+    });
+  } catch(e) {}
 }
 
 function dismissTimer() {
@@ -945,6 +1061,36 @@ function fireNotification(title, msg) {
 
 function showToast(msg, icon = '✓') {
   fireNotification(icon + ' ' + msg, '');
+}
+
+// ===== Manual Timer =====
+function openManualTimer() {
+  document.getElementById('manual-modal').classList.add('open');
+  document.getElementById('manual-name').focus();
+}
+
+function closeManualTimer() {
+  document.getElementById('manual-modal').classList.remove('open');
+}
+
+function startManualTimer() {
+  const name = document.getElementById('manual-name').value.trim() || '手動計時';
+  const mins = parseInt(document.getElementById('manual-minutes').value) || 30;
+  closeManualTimer();
+
+  const now = new Date();
+  const end = new Date(now.getTime() + mins * 60000);
+  const fakeEv = {
+    id: 'manual-' + Date.now(),
+    subject: name,
+    start: { dateTime: now.toISOString() },
+    end:   { dateTime: end.toISOString() },
+    location: { displayName: '' },
+    organizer: { emailAddress: { name: '' } }
+  };
+  activateTimer(fakeEv);
+  document.getElementById('timer-section').style.display = 'block';
+  document.getElementById('dashboard').style.display = 'block';
 }
 
 function vibrateAndBeep() {
