@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetingSync · 會議計時器</title>
+<script>
+window._msalLoaded = false;
+function loadMSALScript(urls, idx) {
+  if (idx >= urls.length) return;
+  const s = document.createElement('script');
+  s.src = urls[idx];
+  s.onload = () => { window._msalLoaded = true; };
+  s.onerror = () => loadMSALScript(urls, idx + 1);
+  document.head.appendChild(s);
+}
+loadMSALScript([
+  'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
+  'https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js',
+  'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js'
+], 0);
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070d;
+  --surface: #0f0f1a;
+  --surface2: #15152280;
+  --border: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.12);
+  --accent: #7c6dfa;
+  --accent-dim: rgba(124,109,250,0.15);
+  --accent-glow: rgba(124,109,250,0.35);
+  --rose: #f06292;
+  --rose-dim: rgba(240,98,146,0.15);
+  --amber: #ffb74d;
+  --amber-dim: rgba(255,183,77,0.15);
+  --emerald: #4ade80;
+  --emerald-dim: rgba(74,222,128,0.12);
+  --text: #f0f0f8;
+  --text-dim: rgba(240,240,248,0.5);
+  --text-muted: rgba(240,240,248,0.25);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Background ── */
+.bg-canvas {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  overflow: hidden;
+}
+.bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.25;
+  animation: orbFloat 12s ease-in-out infinite;
+}
+.bg-orb-1 { width: 500px; height: 500px; background: #7c6dfa; top: -150px; left: -150px; animation-delay: 0s; }
+.bg-orb-2 { width: 400px; height: 400px; background: #f06292; bottom: -100px; right: -100px; animation-delay: -6s; opacity: 0.15; }
+.bg-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+@keyframes orbFloat {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33% { transform: translate(40px,30px) scale(1.05); }
+  66% { transform: translate(-20px,50px) scale(0.95); }
+}
+
+/* ── App Shell ── */
+.app {
+  position: relative; z-index: 1;
+  max-width: 860px; margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+
+/* ── Header ── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 36px;
+}
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-mark {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--rose));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.logo-name {
+  font-family: 'Space Mono', monospace;
+  font-size: 16px; font-weight: 700; letter-spacing: -0.5px;
+}
+.logo-tag { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+.status-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+}
+.status-badge.connected { background: var(--emerald-dim); color: var(--emerald); border: 1px solid rgba(74,222,128,0.2); }
+.status-badge.disconnected { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+.status-badge.demo { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(124,109,250,0.25); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: blink 2s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Setup ── */
+#setup-panel { padding: 20px 0; }
+.setup-hero { text-align: center; margin-bottom: 40px; }
+.setup-icon { font-size: 56px; margin-bottom: 20px; display: block; }
+.setup-title {
+  font-size: 30px; font-weight: 800; letter-spacing: -1px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, var(--text) 30%, var(--accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.setup-desc { color: var(--text-dim); font-size: 14px; line-height: 1.7; }
+
+.steps-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  margin: 32px 0;
+}
+.step-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px 18px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.step-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+.step-num {
+  font-family: 'Space Mono', monospace; font-size: 28px; font-weight: 700;
+  color: var(--accent); opacity: 0.5; margin-bottom: 10px;
+}
+.step-title { font-size: 13px; font-weight: 700; margin-bottom: 5px; }
+.step-desc { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+
+/* Config card */
+.config-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px; margin-bottom: 20px;
+}
+.config-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px;
+}
+.field-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.field { flex: 1; min-width: 160px; }
+.field label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
+.field input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 10px 14px;
+  font-family: 'Space Mono', monospace; font-size: 12px; color: var(--text);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.field input::placeholder { color: var(--text-muted); }
+
+.toggle-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; font-size: 12px; color: var(--text-dim);
+}
+.toggle-row input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.toggle-row label { cursor: pointer; }
+
+/* ── Buttons ── */
+.btn {
+  font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700;
+  padding: 9px 18px; border-radius: 10px; border: 1px solid var(--border-strong);
+  cursor: pointer; background: var(--surface); color: var(--text);
+  transition: all 0.18s; white-space: nowrap; letter-spacing: 0.2px;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 16px var(--accent-glow); }
+.btn:active { transform: scale(0.97); }
+
+.btn-primary {
+  background: var(--accent); border-color: var(--accent); color: white;
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+.btn-primary:hover { background: #8f82fb; color: white; box-shadow: 0 4px 28px var(--accent-glow); }
+
+.btn-lg { font-size: 14px; padding: 13px 36px; border-radius: 12px; }
+
+.setup-cta { text-align: center; margin-top: 8px; }
+
+/* ── Dashboard ── */
+#dashboard { display: none; }
+
+/* ── Timer Card ── */
+#timer-section {
+  display: none; margin-bottom: 24px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 44px 32px 36px;
+  text-align: center; position: relative; overflow: hidden;
+  transition: border-color 0.4s, box-shadow 0.4s;
+}
+#timer-section::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, var(--accent-dim) 0%, transparent 70%);
+  pointer-events: none;
+}
+#timer-section.state-active { border-color: rgba(124,109,250,0.3); box-shadow: 0 0 60px rgba(124,109,250,0.08); }
+#timer-section.state-warning {
+  border-color: rgba(255,183,77,0.4); box-shadow: 0 0 60px rgba(255,183,77,0.1);
+  animation: warnPulse 1.5s ease-in-out infinite;
+}
+#timer-section.state-danger {
+  border-color: rgba(240,98,146,0.5); box-shadow: 0 0 60px rgba(240,98,146,0.15);
+  animation: warnPulse 0.8s ease-in-out infinite;
+}
+#timer-section::before.state-warning {
+  background: radial-gradient(ellipse at 50% 0%, var(--amber-dim) 0%, transparent 70%);
+}
+@keyframes warnPulse {
+  0%,100% { box-shadow: 0 0 40px rgba(255,183,77,0.1); }
+  50% { box-shadow: 0 0 70px rgba(255,183,77,0.22); }
+}
+
+/* Ring */
+.ring-wrap {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.ring-track { fill: none; stroke: rgba(255,255,255,0.04); stroke-width: 2.5; }
+.ring-fill {
+  fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear, stroke 0.5s ease;
+}
+
+.timer-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.timer-meeting-name {
+  font-size: 18px; font-weight: 700; letter-spacing: -0.3px;
+  color: var(--text); margin-bottom: 28px;
+  max-width: 520px; margin-left: auto; margin-right: auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.timer-display {
+  font-family: 'Space Mono', monospace;
+  font-size: 86px; font-weight: 700; line-height: 1;
+  letter-spacing: -4px; margin-bottom: 6px;
+  transition: color 0.3s;
+}
+.timer-display.normal { color: var(--text); }
+.timer-display.warning { color: var(--amber); }
+.timer-display.danger { color: var(--rose); animation: timerFlash 0.6s infinite; }
+@keyframes timerFlash { 0%,100%{opacity:1} 50%{opacity:0.55} }
+
+.timer-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 36px; font-weight: 600; letter-spacing: 0.3px; }
+
+/* Elapsed bar */
+.elapsed-bar-wrap { margin-bottom: 32px; }
+.elapsed-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.3px; }
+.elapsed-track {
+  height: 4px; background: rgba(255,255,255,0.06);
+  border-radius: 99px; overflow: hidden;
+}
+.elapsed-fill {
+  height: 100%; background: var(--accent); border-radius: 99px;
+  transition: width 1s linear, background 0.3s;
+}
+
+.timer-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* ── Events ── */
+.section-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.section-title { font-size: 15px; font-weight: 800; letter-spacing: -0.3px; }
+.section-meta { display: flex; align-items: center; gap: 10px; }
+.count-badge {
+  font-size: 11px; color: var(--text-muted); font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 3px 10px; border-radius: 20px;
+}
+.refresh-time { font-size: 11px; color: var(--text-muted); }
+
+.events-list { display: flex; flex-direction: column; gap: 8px; }
+
+.event-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 18px;
+  display: flex; align-items: center; gap: 14px;
+  transition: border-color 0.18s, transform 0.18s, background 0.18s;
+  cursor: default;
+}
+.event-card:hover { border-color: var(--border-strong); transform: translateX(3px); }
+.event-card.live {
+  border-color: rgba(74,222,128,0.25); background: rgba(74,222,128,0.03);
+}
+.event-card.soon { border-left: 3px solid var(--amber); }
+.event-card.upcoming { border-left: 3px solid rgba(124,109,250,0.4); }
+.event-card.past { opacity: 0.45; }
+
+.ev-time { text-align: center; min-width: 56px; flex-shrink: 0; }
+.ev-time-main { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; }
+.ev-time-dur { font-size: 10px; color: var(--text-muted); margin-top: 2px; font-weight: 600; }
+
+.ev-divider { width: 1px; height: 32px; background: var(--border); flex-shrink: 0; }
+
+.ev-info { flex: 1; min-width: 0; }
+.ev-title { font-size: 13px; font-weight: 700; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+
+.tag {
+  padding: 2px 8px; border-radius: 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+}
+.tag-live { background: var(--emerald-dim); color: var(--emerald); }
+.tag-soon { background: var(--amber-dim); color: var(--amber); }
+.tag-upcoming { background: var(--accent-dim); color: var(--accent); }
+.tag-past { background: rgba(255,255,255,0.04); color: var(--text-muted); }
+
+.ev-action .btn { padding: 6px 14px; font-size: 11px; }
+
+/* ── Notification ── */
+#notification {
+  position: fixed; top: 20px; right: 20px;
+  background: #141420; border: 1px solid rgba(255,183,77,0.35);
+  border-radius: 14px; padding: 16px 18px; max-width: 300px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 40px rgba(255,183,77,0.1);
+  z-index: 9999; display: none;
+  transform: translateX(340px) scale(0.95);
+  transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+  opacity: 0;
+}
+#notification.show { transform: translateX(0) scale(1); opacity: 1; }
+.notif-row { display: flex; align-items: flex-start; gap: 10px; }
+.notif-icon { font-size: 22px; flex-shrink: 0; }
+.notif-body {}
+.notif-title { font-size: 13px; font-weight: 800; margin-bottom: 3px; }
+.notif-msg { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+/* ── Empty ── */
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.empty-icon { font-size: 44px; margin-bottom: 14px; opacity: 0.4; }
+.empty-msg { font-size: 13px; font-weight: 600; }
+
+/* ── Loader ── */
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Divider ── */
+.divider { height: 1px; background: var(--border); margin: 32px 0; }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .steps-grid { grid-template-columns: 1fr; }
+  .timer-display { font-size: 60px; letter-spacing: -2px; }
+  .field-row { flex-direction: column; }
+  .timer-meeting-name { font-size: 15px; }
+}
+</style>
+</head>
+<body>
+
+<div class="bg-canvas">
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-grid"></div>
+</div>
+
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <div class="logo-mark">📅</div>
+      <div>
+        <div class="logo-name">MeetingSync</div>
+        <div class="logo-tag">Outlook 會議計時器</div>
+      </div>
+    </div>
+    <div id="auth-status">
+      <div class="status-badge disconnected">
+        <div class="status-dot"></div>
+        <span>未連線</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup Panel -->
+  <div id="setup-panel">
+    <div class="setup-hero">
+      <span class="setup-icon">🗓️</span>
+      <div class="setup-title">連接你的 Outlook 行事曆</div>
+      <div class="setup-desc">
+        輸入 Microsoft Azure 應用程式設定，自動偵測今日會議並啟動計時器。
+      </div>
+    </div>
+
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <div class="step-title">建立 Azure App</div>
+        <div class="step-desc">前往 portal.azure.com，註冊新應用程式，取得 Client ID。</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <div class="step-title">設定 API 權限</div>
+        <div class="step-desc">加入 Calendars.Read 權限，並設定正確的重新導向 URI。</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <div class="step-title">貼上 ID 並登入</div>
+        <div class="step-desc">輸入 Client ID，點擊登入，即可開始即時同步行事曆。</div>
+      </div>
+    </div>
+
+    <div class="config-card">
+      <div class="config-label">⚙ Azure 設定</div>
+      <div class="field-row">
+        <div class="field" id="client-id-field">
+          <label>Client ID（應用程式識別碼）</label>
+          <input id="client-id-input" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+        </div>
+        <div class="field" style="max-width:160px">
+          <label>提醒提前時間（分鐘）</label>
+          <input id="warning-minutes" type="number" value="5" min="1" max="30" />
+        </div>
+        <button class="btn btn-primary" onclick="startAuth()">🔐 Microsoft 登入</button>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="demo-mode" checked />
+        <label for="demo-mode">使用示範模式（無需真實帳戶，快速體驗）</label>
+      </div>
+    </div>
+
+    <div class="setup-cta">
+      <button class="btn btn-primary btn-lg" onclick="initApp()">▶ 開始使用</button>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard">
+
+    <!-- Timer -->
+    <div id="timer-section">
+      <svg class="ring-wrap" width="340" height="340" viewBox="0 0 340 340">
+        <circle class="ring-track" cx="170" cy="170" r="158"/>
+        <circle class="ring-fill" id="ring-fill" cx="170" cy="170" r="158"
+          stroke-dasharray="992.88" stroke-dashoffset="0"/>
+      </svg>
+
+      <div class="timer-eyebrow">⏱ 進行中的會議</div>
+      <div class="timer-meeting-name" id="timer-meeting-name">—</div>
+      <div class="timer-display normal" id="timer-display">00:00</div>
+      <div class="timer-sub" id="timer-sub">剩餘時間</div>
+
+      <div class="elapsed-bar-wrap">
+        <div class="elapsed-label">
+          <span>已進行</span>
+          <span id="elapsed-pct">0%</span>
+        </div>
+        <div class="elapsed-track">
+          <div class="elapsed-fill" id="elapsed-fill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="timer-controls">
+        <button class="btn" onclick="dismissTimer()">✕ 關閉</button>
+        <button class="btn btn-primary" id="snooze-btn" onclick="snoozeReminder()" style="display:none">⏰ 延後 2 分鐘</button>
+      </div>
+    </div>
+
+    <!-- Events -->
+    <div class="section-bar">
+      <div class="section-title">今日會議</div>
+      <div class="section-meta">
+        <span class="refresh-time" id="refresh-time"></span>
+        <button class="btn" id="refresh-btn" onclick="refreshEvents()" style="padding:6px 12px;font-size:11px">↻ 重新整理</button>
+        <span class="count-badge" id="event-count">—</span>
+      </div>
+    </div>
+    <div class="events-list" id="events-grid">
+      <div class="empty-state"><div class="empty-icon">📭</div><div class="empty-msg">載入中…</div></div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- Notification -->
+<div id="notification">
+  <div class="notif-row">
+    <div class="notif-icon">⚠️</div>
+    <div class="notif-body">
+      <div class="notif-title" id="notif-title">會議即將結束</div>
+      <div class="notif-msg" id="notif-msg">還剩 5 分鐘</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+let CLIENT_ID = '';
+let WARNING_MINUTES = 5;
+let IS_DEMO = true;
+let msalInstance = null;
+let accessToken = null;
+let timerInterval = null;
+let pollInterval = null;
+let activeEvent = null;
+let notifTimeout = null;
+let warnedEvents = new Set();
+let dismissedTimers = new Set();
+let snoozedUntil = {};
+let currentEvents = [];
+
+// Ring circumference for r=158: 2*π*158 ≈ 992.88
+const CIRCUMFERENCE = 992.88;
+
+// ===== MSAL =====
+async function loadMSAL() {
+  if (window.msal) return true;
+  for (let i = 0; i < 50; i++) {
+    if (window.msal) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js';
+    s.onload = () => resolve(!!window.msal);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+
+function toggleDemo() {
+  IS_DEMO = document.getElementById('demo-mode').checked;
+  // Client ID field is always editable; demo mode is just a flag
+}
+
+async function startAuth() {
+  CLIENT_ID = document.getElementById('client-id-input').value.trim();
+  if (!CLIENT_ID) { showToast('請先輸入 Client ID', '❌'); return; }
+
+  const loaded = await loadMSAL();
+  if (!loaded) { showToast('無法載入 MSAL，請確認網路', '❌'); return; }
+
+  const config = {
+    auth: {
+      clientId: CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/common',
+      redirectUri: window.location.origin + window.location.pathname
+    }
+  };
+
+  try {
+    msalInstance = new msal.PublicClientApplication(config);
+    await msalInstance.initialize();
+    const response = await msalInstance.loginPopup({ scopes: ['Calendars.Read', 'User.Read'] });
+    accessToken = response.accessToken;
+    IS_DEMO = false;
+    document.getElementById('demo-mode').checked = false;
+    initApp();
+  } catch(e) {
+    console.error(e);
+    showToast('登入失敗：' + e.message, '❌');
+  }
+}
+
+async function getToken() {
+  if (!msalInstance) return null;
+  const accounts = msalInstance.getAllAccounts();
+  if (!accounts.length) return null;
+  const result = await msalInstance.acquireTokenSilent({ scopes: ['Calendars.Read'], account: accounts[0] });
+  return result.accessToken;
+}
+
+// ===== Init =====
+function initApp() {
+  WARNING_MINUTES = parseInt(document.getElementById('warning-minutes').value) || 5;
+  IS_DEMO = document.getElementById('demo-mode').checked;
+
+  document.getElementById('setup-panel').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const statusEl = document.getElementById('auth-status');
+  if (IS_DEMO) {
+    statusEl.innerHTML = `<div class="status-badge demo"><div class="status-dot"></div><span>示範模式</span></div>`;
+  } else {
+    statusEl.innerHTML = `<div class="status-badge connected"><div class="status-dot"></div><span>已連線</span></div>`;
+  }
+
+  refreshEvents();
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(refreshEvents, 60000);
+}
+
+// ===== Events =====
+function getDemoEvents() {
+  const now = new Date();
+  return [
+    {
+      id: 'demo-1',
+      subject: '週會 — 產品路線圖討論',
+      start: { dateTime: new Date(now.getTime() - 10 * 60000).toISOString() },
+      end:   { dateTime: new Date(now.getTime() + 20 * 60000).toISOString() },
+      location: { displayName: 'Teams 線上會議' },
+      organizer: { emailAddress: { name: '王小明' } }
+    },
+    {
+      id: 'demo-2',
+      subject: '客戶簡報 — Q2 成果報告',
+      start: { dateTime: new Date(now.getTime() + 45 * 60000).toISOString() },
+      end:   { dateTime: new Date(now.getTime() + 105 * 60000).toISOString() },
+      location: { displayName: '會議室 A301' },
+      organizer: { emailAddress: { name: '陳美玲' } }
+    },
+    {
+      id: 'demo-3',
+      subject: '技術評審：新架構設計',
+      start: { dateTime: new Date(now.getTime() + 3 * 3600000).toISOString() },
+      end:   { dateTime: new Date(now.getTime() + 4 * 3600000).toISOString() },
+      location: { displayName: 'Zoom' },
+      organizer: { emailAddress: { name: '林志遠' } }
+    }
+  ];
+}
+
+// Parse Graph API dateTime (no timezone suffix) as local time
+function parseGraphDate(dt) {
+  if (!dt) return new Date();
+  // Graph API returns datetime in the user's local timezone without 'Z'
+  // Use Intl to detect actual local offset instead of hardcoding +08:00
+  if (dt.endsWith('Z') || dt.includes('+') || (dt.includes('-') && dt.lastIndexOf('-') > 7)) {
+    return new Date(dt); // Already has timezone info
+  }
+  // No timezone info: treat as local time by replacing T with space (Safari fix)
+  // Then interpret as local using Date constructor trick
+  const offsetMs = new Date().getTimezoneOffset() * 60000;
+  return new Date(new Date(dt.replace('T', ' ')).getTime() + offsetMs * 0 );
+  // Actually just append local offset string
+}
+
+function parseGraphDateFixed(dt) {
+  if (!dt) return new Date();
+  if (dt.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dt)) return new Date(dt);
+  // No TZ: browser local time - get offset and apply
+  const local = new Date(dt.replace('T', ' '));
+  return isNaN(local) ? new Date(dt) : local;
+}
+
+async function fetchOutlookEvents() {
+  try {
+    const token = await getToken() || accessToken;
+    if (!token) return getDemoEvents();
+
+    const today = new Date();
+    // Build query range in local time string format for Graph API
+    const pad = n => String(n).padStart(2,'0');
+    const d = new Date();
+    const localStart = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T00:00:00`;
+    const localEnd   = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T23:59:59`;
+    const start = new Date(today.setHours(0,0,0,0)).toISOString();
+    const end   = new Date(today.setHours(23,59,59,999)).toISOString();
+    const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${localStart}&endDateTime=${localEnd}&$select=subject,start,end,location,organizer,id&$orderby=start/dateTime&$top=20`;
+
+    const resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+    });
+    if (!resp.ok) throw new Error('API ' + resp.status);
+    const data = await resp.json();
+    return data.value || [];
+  } catch(e) {
+    console.error('Fetch error:', e);
+    return getDemoEvents();
+  }
+}
+
+async function refreshEvents() {
+  const btn = document.getElementById('refresh-btn');
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  const events = IS_DEMO ? getDemoEvents() : await fetchOutlookEvents();
+  currentEvents = events;
+
+  renderEvents(events);
+  checkAndActivateTimer(events);
+
+  btn.innerHTML = '↻ 重新整理';
+  document.getElementById('refresh-time').textContent =
+    '更新 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderEvents(events) {
+  const grid = document.getElementById('events-grid');
+  const countEl = document.getElementById('event-count');
+  countEl.textContent = events.length + ' 場';
+
+  if (!events.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">☀️</div><div class="empty-msg">今天沒有排定的會議</div></div>`;
+    return;
+  }
+
+  const now = new Date();
+  grid.innerHTML = events.map(ev => {
+    const start = parseGraphDateFixed(ev.start.dateTime);
+    const end   = parseGraphDateFixed(ev.end.dateTime);
+    const diffStart = (start - now) / 60000;
+    const duration  = Math.round((end - start) / 60000);
+    const isLive    = start <= now && end > now;
+    const isSoon    = diffStart > 0 && diffStart <= 15;
+    const isPast    = end <= now;
+
+    let cardCls = 'event-card upcoming';
+    let tag = `<span class="tag tag-upcoming">即將開始</span>`;
+    if (isLive) {
+      cardCls = 'event-card live';
+      tag = `<span class="tag tag-live">● 進行中</span>`;
+    } else if (isSoon) {
+      cardCls = 'event-card soon';
+      tag = `<span class="tag tag-soon">⚡ ${Math.round(diffStart)} 分後</span>`;
+    } else if (isPast) {
+      cardCls = 'event-card past';
+      tag = `<span class="tag tag-past">已結束</span>`;
+    }
+
+    const timeStr = start.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    const loc = ev.location?.displayName || '';
+    const org = ev.organizer?.emailAddress?.name || '';
+
+    return `
+      <div class="${cardCls}">
+        <div class="ev-time">
+          <div class="ev-time-main">${timeStr}</div>
+          <div class="ev-time-dur">${duration} 分</div>
+        </div>
+        <div class="ev-divider"></div>
+        <div class="ev-info">
+          <div class="ev-title">${ev.subject || '（無標題）'}</div>
+          <div class="ev-meta">
+            ${tag}
+            ${loc ? `<span>📍 ${loc}</span>` : ''}
+            ${org ? `<span>👤 ${org}</span>` : ''}
+          </div>
+        </div>
+        ${isLive && !dismissedTimers.has(ev.id) ? `
+          <div class="ev-action">
+            <button class="btn btn-primary" onclick="activateTimer(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 計時</button>
+          </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ===== Timer =====
+function checkAndActivateTimer(events) {
+  if (!events) return;
+  const now = new Date();
+  for (const ev of events) {
+    const start = parseGraphDateFixed(ev.start.dateTime);
+    const end   = parseGraphDateFixed(ev.end.dateTime);
+    if (start <= now && end > now && !dismissedTimers.has(ev.id) && (!activeEvent || activeEvent.id !== ev.id)) {
+      activateTimer(ev);
+      break;
+    }
+  }
+}
+
+function activateTimer(ev) {
+  activeEvent = ev;
+  const section = document.getElementById('timer-section');
+  section.style.display = 'block';
+  section.className = 'state-active';
+  document.getElementById('timer-meeting-name').textContent = ev.subject || '（無標題）';
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => updateTimer(ev), 1000);
+  updateTimer(ev);
+}
+
+function updateTimer(ev) {
+  const now       = new Date();
+  const end       = parseGraphDateFixed(ev.end.dateTime);
+  const start     = parseGraphDateFixed(ev.start.dateTime);
+  const total     = (end - start) / 1000;
+  const remaining = Math.max(0, (end - now) / 1000);
+  const elapsed   = total - remaining;
+  const pct       = Math.min(1, elapsed / total);
+
+  // Clock display
+  const mins = Math.floor(remaining / 60);
+  const secs = Math.floor(remaining % 60);
+  document.getElementById('timer-display').textContent =
+    String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
+
+  // Elapsed bar
+  const pctInt = Math.round(pct * 100);
+  document.getElementById('elapsed-fill').style.width = pctInt + '%';
+  document.getElementById('elapsed-pct').textContent = pctInt + '%';
+
+  // Ring
+  const ring = document.getElementById('ring-fill');
+  ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
+
+  const section = document.getElementById('timer-section');
+  const timerEl = document.getElementById('timer-display');
+  const fillEl  = document.getElementById('elapsed-fill');
+  const warnSecs = WARNING_MINUTES * 60;
+
+  if (remaining <= 0) {
+    timerEl.className = 'timer-display danger';
+    section.className = 'state-danger';
+    document.getElementById('timer-sub').textContent = '⚠ 會議時間已到';
+    ring.style.stroke = 'var(--rose)';
+    fillEl.style.background = 'var(--rose)';
+  } else if (remaining <= warnSecs) {
+    timerEl.className = 'timer-display warning';
+    section.className = 'state-warning';
+    ring.style.stroke = 'var(--amber)';
+    fillEl.style.background = 'var(--amber)';
+    document.getElementById('timer-sub').textContent = `⚠ 剩餘 ${Math.ceil(remaining/60)} 分鐘`;
+
+    const snoozeTime = snoozedUntil[ev.id];
+    const shouldWarn = !warnedEvents.has(ev.id) || (snoozeTime && now >= snoozeTime);
+    if (shouldWarn) {
+      warnedEvents.add(ev.id);
+      delete snoozedUntil[ev.id];
+      fireNotification(`⚠ ${ev.subject}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
+      document.getElementById('snooze-btn').style.display = 'inline-flex';
+      vibrateAndBeep();
+    }
+  } else {
+    timerEl.className = 'timer-display normal';
+    section.className = 'state-active';
+    ring.style.stroke = 'var(--accent)';
+    fillEl.style.background = 'var(--accent)';
+    document.getElementById('timer-sub').textContent = '剩餘時間';
+  }
+}
+
+function dismissTimer() {
+  if (activeEvent) dismissedTimers.add(activeEvent.id);
+  document.getElementById('timer-section').style.display = 'none';
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  activeEvent = null;
+  document.getElementById('snooze-btn').style.display = 'none';
+  renderEvents(currentEvents);
+}
+
+function snoozeReminder() {
+  if (!activeEvent) return;
+  snoozedUntil[activeEvent.id] = new Date(Date.now() + 2 * 60000);
+  warnedEvents.delete(activeEvent.id);
+  document.getElementById('snooze-btn').style.display = 'none';
+  showToast('已延後 2 分鐘提醒', '⏰');
+}
+
+// ===== Notification =====
+function fireNotification(title, msg) {
+  const el = document.getElementById('notification');
+  document.getElementById('notif-title').textContent = title;
+  document.getElementById('notif-msg').textContent = msg;
+  el.style.display = 'block';
+  requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
+
+  if (notifTimeout) clearTimeout(notifTimeout);
+  notifTimeout = setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { el.style.display = 'none'; }, 400);
+  }, 8000);
+
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body: msg });
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(p => {
+      if (p === 'granted') new Notification(title, { body: msg });
+    });
+  }
+}
+
+function showToast(msg, icon = '✓') {
+  fireNotification(icon + ' ' + msg, '');
+}
+
+function vibrateAndBeep() {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+  } catch(e) {}
+}
+
+// ===== Boot =====
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('demo-mode').addEventListener('change', toggleDemo);
+  toggleDemo();
+  if (Notification.permission === 'default') {
+    setTimeout(() => Notification.requestPermission(), 2000);
+  }
+});
+</script>
+</body>
+</html>
