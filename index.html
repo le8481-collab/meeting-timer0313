@@ -1051,11 +1051,11 @@ function updateTimer(ev, t) {
       const snoozeTime = snoozedUntil[ev.id];
       const alreadyWarned = warnedEvents.has(ev.id);
       const snoozeExpired = snoozeTime && nowTs >= snoozeTime;
+      _setStatus('⚠警告區 warned=' + alreadyWarned + ' snoozeExp=' + snoozeExpired + ' remain=' + Math.round(remaining));
       if (!alreadyWarned || snoozeExpired) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        // Try auto-play; if blocked (iOS), show tap-to-alert button
         _primeAudio();
         setTimeout(() => vibrateAndBeep(), 300);
       }
@@ -1642,11 +1642,11 @@ function updateTimer(ev, t) {
       const snoozeTime = snoozedUntil[ev.id];
       const alreadyWarned = warnedEvents.has(ev.id);
       const snoozeExpired = snoozeTime && nowTs >= snoozeTime;
+      _setStatus('⚠警告區 warned=' + alreadyWarned + ' snoozeExp=' + snoozeExpired + ' remain=' + Math.round(remaining));
       if (!alreadyWarned || snoozeExpired) {
         warnedEvents.add(ev.id);
         delete snoozedUntil[ev.id];
         fireNotification(`⚠ ${ev.subject || '會議'}`, `還剩 ${Math.ceil(remaining/60)} 分鐘，請準備結束！`);
-        // Try auto-play; if blocked (iOS), show tap-to-alert button
         _primeAudio();
         setTimeout(() => vibrateAndBeep(), 300);
       }
