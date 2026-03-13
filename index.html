@@ -441,6 +441,15 @@ body {
           <label>提醒提前時間（分鐘）</label>
           <input id="warning-minutes" type="number" value="5" min="1" max="30" />
         </div>
+        <div class="field" style="max-width:160px">
+          <label>Outlook 更新頻率</label>
+          <select id="poll-interval" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:10px;padding:10px 14px;font-family:'Space Mono',monospace;font-size:12px;color:var(--text);">
+            <option value="30">每 30 秒</option>
+            <option value="60" selected>每 1 分鐘</option>
+            <option value="300">每 5 分鐘</option>
+            <option value="600">每 10 分鐘</option>
+          </select>
+        </div>
         <button class="btn btn-primary" onclick="startAuth()">🔐 Microsoft 登入</button>
       </div>
       <div class="toggle-row">
@@ -482,6 +491,7 @@ body {
 
       <div class="timer-controls">
         <button class="btn" onclick="dismissTimer()">✕ 關閉</button>
+        <button class="btn" onclick="endEarly()" style="border-color:var(--rose);color:var(--rose)">⏹ 提早結束</button>
         <button class="btn btn-primary" id="snooze-btn" onclick="snoozeReminder()" style="display:none">⏰ 延後 2 分鐘</button>
       </div>
     </div>
@@ -608,7 +618,8 @@ function initApp() {
 
   refreshEvents();
   if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(refreshEvents, 60000);
+  const pollSecs = parseInt(document.getElementById('poll-interval').value) || 60;
+  pollInterval = setInterval(refreshEvents, pollSecs * 1000);
 }
 
 // ===== Events =====
@@ -766,15 +777,36 @@ function renderEvents(events) {
             ${org ? `<span>👤 ${org}</span>` : ''}
           </div>
         </div>
-        ${isLive && !dismissedTimers.has(ev.id) ? `
+        ${!isPast && !dismissedTimers.has(ev.id) ? `
           <div class="ev-action">
-            <button class="btn btn-primary" onclick="activateTimer(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ 計時</button>
+            <button class="btn ${isLive ? 'btn-primary' : ''}" onclick="activateTimerManual(${JSON.stringify(ev).replace(/"/g,'&quot;')})">⏱ ${isLive ? '計時' : '提早開始'}</button>
           </div>` : ''}
       </div>`;
   }).join('');
 }
 
 // ===== Timer =====
+function activateTimerManual(ev) {
+  // Allow starting any non-past event manually
+  // Override the end time if starting early (use original end time)
+  activateTimer(ev);
+}
+
+function endEarly() {
+  // Mark as ended now
+  if (!activeEvent) return;
+  // Create a fake end at now so timer shows 00:00
+  const now = new Date();
+  const fakeEv = { ...activeEvent, end: { dateTime: now.toISOString() } };
+  dismissedTimers.add(activeEvent.id);
+  document.getElementById('timer-section').style.display = 'none';
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  activeEvent = null;
+  document.getElementById('snooze-btn').style.display = 'none';
+  renderEvents(currentEvents);
+  showToast('會議已提早結束', '✓');
+}
+
 function checkAndActivateTimer(events) {
   if (!events) return;
   const now = new Date();
@@ -789,6 +821,8 @@ function checkAndActivateTimer(events) {
 }
 
 function activateTimer(ev) {
+  // Tag with manual start time for early-start progress tracking
+  ev._manualStart = Date.now();
   activeEvent = ev;
   const section = document.getElementById('timer-section');
   section.style.display = 'block';
@@ -802,11 +836,13 @@ function activateTimer(ev) {
 function updateTimer(ev) {
   const now       = new Date();
   const end       = parseGraphDateFixed(ev.end.dateTime);
-  const start     = parseGraphDateFixed(ev.start.dateTime);
+  const schedStart = parseGraphDateFixed(ev.start.dateTime);
+  // If started early, use activation time as start for progress calculation
+  const start     = ev._manualStart ? new Date(ev._manualStart) : (schedStart > now ? now : schedStart);
   const total     = (end - start) / 1000;
   const remaining = Math.max(0, (end - now) / 1000);
-  const elapsed   = total - remaining;
-  const pct       = Math.min(1, elapsed / total);
+  const elapsed   = Math.max(0, total - remaining);
+  const pct       = Math.min(1, total > 0 ? elapsed / total : 0);
 
   // Clock display
   const mins = Math.floor(remaining / 60);
