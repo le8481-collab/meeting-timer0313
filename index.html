@@ -971,9 +971,16 @@ function updateTimer(ev, t) {
   if (isOvertime) {
     // Overtime: count UP from 00:00, show red
     const overtimeSecs = Math.abs(rawRemain);
-    const om = Math.floor(overtimeSecs / 60);
-    const os = Math.floor(overtimeSecs % 60);
-    timerEl.textContent = '+' + String(om).padStart(2,'0') + ':' + String(os).padStart(2,'0');
+    if (overtimeSecs >= 3600) {
+      const oh = Math.floor(overtimeSecs / 3600);
+      const om = Math.floor((overtimeSecs % 3600) / 60);
+      const os = Math.floor(overtimeSecs % 60);
+      timerEl.textContent = '+' + oh + ':' + String(om).padStart(2,'0') + ':' + String(os).padStart(2,'0');
+    } else {
+      const om = Math.floor(overtimeSecs / 60);
+      const os = Math.floor(overtimeSecs % 60);
+      timerEl.textContent = '+' + String(om).padStart(2,'0') + ':' + String(os).padStart(2,'0');
+    }
     timerEl.className = 'timer-display overtime';
     section.className = 'state-danger';
     subEl.textContent = '超時中';
@@ -1034,9 +1041,18 @@ function updateTimer(ev, t) {
     }
     // Always update the displayed time (was missing!)
     if (!isOvertime) {
-      const rm = Math.floor(remaining / 60);
-      const rs = Math.floor(remaining % 60);
-      timerEl.textContent = String(rm).padStart(2,'0') + ':' + String(rs).padStart(2,'0');
+      if (remaining >= 3600) {
+        // Over 1 hour: show H:MM:SS
+        const rh = Math.floor(remaining / 3600);
+        const rm = Math.floor((remaining % 3600) / 60);
+        const rs = Math.floor(remaining % 60);
+        timerEl.textContent = String(rh) + ':' + String(rm).padStart(2,'0') + ':' + String(rs).padStart(2,'0');
+      } else {
+        // Under 1 hour: show MM:SS
+        const rm = Math.floor(remaining / 60);
+        const rs = Math.floor(remaining % 60);
+        timerEl.textContent = String(rm).padStart(2,'0') + ':' + String(rs).padStart(2,'0');
+      }
     }
   }
 }
